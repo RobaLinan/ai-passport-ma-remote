@@ -58,7 +58,8 @@ static char s_queue_id[96];
 static volatile bool s_input_ready;
 static volatile bool s_is_playing;
 static volatile bool s_volume_known;
-static volatile int64_t s_volume_cmd_us;
+static int s_volume_feedback = -1;
+static bool s_volume_feedback_valid;
 static volatile int64_t s_last_activity_us;
 static volatile bool s_display_on = true;
 static volatile bool s_display_dim;
@@ -397,7 +398,8 @@ static void resolve_player(void) {
     queue_id_store("");
     s_volume_known = false;
     s_volume_target_valid = false;
-    s_volume_cmd_us = 0;
+    s_volume_feedback_valid = false;
+    s_volume_feedback = -1;
     ui_volume(-1);
     s_is_playing = false;
 
@@ -429,7 +431,6 @@ static void cmd_task(void *arg) {
         }
         case APP_CMD_VOLUME_UP:
         case APP_CMD_VOLUME_DOWN:
-            s_volume_cmd_us = esp_timer_get_time();
             if (!s_volume_target_valid) {
                 // Some players (notably groups) never report a volume. Step
                 // from our own target instead of MA's volume_up/down, which
@@ -579,20 +580,35 @@ static void net_task(void *arg) {
         const esp_err_t err = ma_fetch_status(&st);
         if (err == ESP_OK) {
             s_is_playing = st.playing;
-            const bool recent_cmd =
-                esp_timer_get_time() - s_volume_cmd_us <= 2LL * 1000 * 1000;
             if (!st.volume_known) {
                 if (s_volume_known) {
                     s_volume_known = false;
                     if (s_volume_target_valid) ui_volume_ex(s_volume, true);
                     else ui_volume(-1);
                 }
-            } else if (!recent_cmd &&
-                       (!s_volume_known || st.volume != s_volume)) {
+            } else if (!s_volume_feedback_valid || st.volume != s_volume_feedback) {
+                // Accept real feedback, including changes made outside the
+                // remote. Unchanged feedback is not allowed to overwrite an
+                // optimistic target: some players keep reporting 0 forever.
+                s_volume_feedback = st.volume;
+                s_volume_feedback_valid = true;
                 s_volume_known = true;
                 s_volume_target_valid = true;
                 s_volume = st.volume;
                 ui_volume_ex(s_volume, false);
+            } else if (!s_volume_target_valid) {
+                s_volume_target_valid = true;
+                s_volume_known = true;
+                s_volume = st.volume;
+                ui_volume_ex(s_volume, false);
+            } else if (st.volume == s_volume) {
+                if (!s_volume_known) {
+                    s_volume_known = true;
+                    ui_volume_ex(s_volume, false);
+                }
+            } else if (s_volume_known) {
+                s_volume_known = false;
+                ui_volume_ex(s_volume, true);
             }
             if (!voice_client_ui_blocked()) {
                 ui_wifi(true);
