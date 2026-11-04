@@ -10,6 +10,7 @@
 #include "key_guard.h"
 #include "lvgl.h"
 #include "ma_client.h"
+#include "ota_server.h"
 #include "provisioning.h"
 #include "voice_client.h"
 #include "wifi_sta.h"
@@ -66,8 +67,10 @@ static volatile bool s_resolve_player = true;
 static int s_suppress_btn = -1;
 static key_guard_t s_key_guard;
 static int s_volume = 50;
+static bool s_volume_target_valid;
 static int64_t s_ok_press_us;
 static bool s_ptt_active;
+static bool s_ptt_long;
 static int64_t s_ptt_short_until_us;
 static int64_t s_ptt_commit_until_us;
 
@@ -116,6 +119,7 @@ static void handle_input(const input_event_t *input) {
             if (voice_client_busy()) return;
             s_ok_press_us = now;
             s_ptt_active = true;
+            s_ptt_long = false;
             char qid[96];
             const bool have_queue = queue_id_copy(qid, sizeof(qid));
             voice_client_start(s_config.player_id, have_queue ? qid : "");
@@ -125,7 +129,10 @@ static void handle_input(const input_event_t *input) {
             if (!s_ptt_active) return;
             s_ptt_active = false;
             const int64_t held = now - s_ok_press_us;
-            if (held >= 500000) {
+            const bool long_press =
+                s_ptt_long || held >= (int64_t)BSP_BTN_LONG_PRESS_MS * 1000;
+            s_ptt_long = false;
+            if (long_press) {
                 s_ptt_commit_until_us = now;
                 voice_client_commit();
                 voice_client_stop();
@@ -136,6 +143,9 @@ static void handle_input(const input_event_t *input) {
             return;
         }
         if (input->ev == BSP_BTN_LONG) {
+            if (!s_ptt_active || s_ptt_long) return;
+            s_ptt_long = true;
+            voice_client_listening();
             return;
         }
         if (input->ev == BSP_BTN_CLICK) {
@@ -193,11 +203,15 @@ static void ui_playing(bool playing) {
     }
 }
 
-static void ui_volume(int volume) {
+static void ui_volume_ex(int volume, bool estimated) {
     if (bsp_lvgl_lock(200)) {
-        app_ui_set_volume(volume);
+        app_ui_set_volume_ex(volume, estimated);
         bsp_lvgl_unlock();
     }
+}
+
+static void ui_volume(int volume) {
+    ui_volume_ex(volume, false);
 }
 
 static int normal_brightness(void) {
@@ -291,6 +305,11 @@ static void power_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(200));
         if (s_sleeping) continue;
+        if (ota_server_busy()) {
+            s_last_activity_us = esp_timer_get_time();
+            if (!s_display_on) display_wake();
+            continue;
+        }
         const int64_t idle = esp_timer_get_time() - s_last_activity_us;
         int off_s = s_config.sleep_timeout_s;
         if (off_s < MIN_SCREEN_OFF_S) off_s = MIN_SCREEN_OFF_S;
@@ -377,6 +396,8 @@ static void resolve_player(void) {
     }
     queue_id_store("");
     s_volume_known = false;
+    s_volume_target_valid = false;
+    s_volume_cmd_us = 0;
     ui_volume(-1);
     s_is_playing = false;
 
@@ -409,21 +430,24 @@ static void cmd_task(void *arg) {
         case APP_CMD_VOLUME_UP:
         case APP_CMD_VOLUME_DOWN:
             s_volume_cmd_us = esp_timer_get_time();
-            if (s_volume_known) {
-                if (cmd == APP_CMD_VOLUME_UP && s_volume < 100) s_volume += 5;
-                if (cmd == APP_CMD_VOLUME_DOWN && s_volume > 0) s_volume -= 5;
-                ui_volume(s_volume);
-                ESP_LOGI(TAG, "cmd volume_set %d", s_volume);
-                (void)ma_volume_set(s_volume);
-            } else {
-                ESP_LOGI(TAG, "cmd volume_%s (level unknown)",
-                         cmd == APP_CMD_VOLUME_UP ? "up" : "down");
-                if (cmd == APP_CMD_VOLUME_UP) {
-                    (void)ma_volume_up();
-                } else {
-                    (void)ma_volume_down();
-                }
+            if (!s_volume_target_valid) {
+                // Some players (notably groups) never report a volume. Step
+                // from our own target instead of MA's volume_up/down, which
+                // restarts at 0 when the player reports nothing.
+                s_volume = 0;
+                s_volume_target_valid = true;
             }
+            if (cmd == APP_CMD_VOLUME_UP) {
+                if (s_volume <= 95) s_volume += 5;
+                else s_volume = 100;
+            } else {
+                if (s_volume >= 5) s_volume -= 5;
+                else s_volume = 0;
+            }
+            ui_volume_ex(s_volume, !s_volume_known);
+            ESP_LOGI(TAG, "cmd volume_set %d (feedback=%s)", s_volume,
+                     s_volume_known ? "known" : "none");
+            (void)ma_volume_set(s_volume);
             break;
         case APP_CMD_NEXT:
         case APP_CMD_PREVIOUS:
@@ -489,6 +513,10 @@ static void net_task(void *arg) {
     }
     ui_wifi(true);
     last_wifi = WIFI_STA_CONNECTED;
+    const esp_err_t ota_err = ota_server_start();
+    if (ota_err != ESP_OK) {
+        ESP_LOGW(TAG, "OTA server unavailable: %s", esp_err_to_name(ota_err));
+    }
     ui_message("正在连接", "Music Assistant");
 
     if (ma_client_init(&s_config) != ESP_OK) {
@@ -551,17 +579,20 @@ static void net_task(void *arg) {
         const esp_err_t err = ma_fetch_status(&st);
         if (err == ESP_OK) {
             s_is_playing = st.playing;
+            const bool recent_cmd =
+                esp_timer_get_time() - s_volume_cmd_us <= 2LL * 1000 * 1000;
             if (!st.volume_known) {
                 if (s_volume_known) {
                     s_volume_known = false;
-                    ui_volume(-1);
+                    if (s_volume_target_valid) ui_volume_ex(s_volume, true);
+                    else ui_volume(-1);
                 }
-            } else if (!s_volume_known ||
-                       (esp_timer_get_time() - s_volume_cmd_us > 2LL * 1000 * 1000 &&
-                        st.volume != s_volume)) {
+            } else if (!recent_cmd &&
+                       (!s_volume_known || st.volume != s_volume)) {
                 s_volume_known = true;
+                s_volume_target_valid = true;
                 s_volume = st.volume;
-                ui_volume(s_volume);
+                ui_volume_ex(s_volume, false);
             }
             if (!voice_client_ui_blocked()) {
                 ui_wifi(true);

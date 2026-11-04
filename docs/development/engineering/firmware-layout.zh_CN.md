@@ -4,20 +4,23 @@
 
 # 固件布局
 
-本仓库是供用户自定义固件使用的最小基础示例，目标为带 8 MB Flash 的
-ESP32-C3。默认布局不预留产品专用身份、OTA 或未使用的数据分区。
+本仓库目标为带 8 MB Flash 的 ESP32-C3。当前应用使用两个 OTA app 分区，
+可以通过局域网升级。
 
 ## 默认布局
 
-默认分区表只包含：
+默认分区表包含：
 
 | 分区 | 类型/子类型 | 偏移 | 大小 | 用途 |
 | --- | --- | ---: | ---: | --- |
 | `nvs` | data/NVS | `0x9000` | `0x6000` | ESP-IDF 与应用键值存储 |
-| `phy_init` | data/PHY | `0xF000` | `0x1000` | PHY 初始化数据 |
-| `factory` | app/factory | `0x10000` | `0x7F0000` | 唯一应用镜像，占用全部剩余 Flash |
+| `otadata` | data/OTA | `0xF000` | `0x2000` | OTA 启动选择数据 |
+| `phy_init` | data/PHY | `0x11000` | `0x1000` | PHY 初始化数据 |
+| `ota_0` | app/ota_0 | `0x20000` | `0x3F0000` | 第一个应用分区 |
+| `ota_1` | app/ota_1 | `0x410000` | `0x3F0000` | 第二个应用分区 |
 
-默认布局没有 OTA 槽；它只是起点，不限制用户固件。
+使用该布局的第一个镜像必须通过 USB 烧录到 `0x0`；之后的升级可以通过设备
+OTA 页面写入非当前分区，并保留 NVS 配置。
 
 ## 自定义布局
 
@@ -43,8 +46,12 @@ ESP32-C3。默认布局不预留产品专用身份、OTA 或未使用的数据�
 额外镜像必须完整落在一个实际配置的分区内，允许从该分区内部偏移开始。
 仅声明资源分区不要求预装镜像，但一旦在 `flash_args` 列出镜像就必须校验它。
 
-只上传 `build/FoloToy-AI-Passport-full.bin`。名称相近的应用单镜像
-`build/FoloToy-AI-Passport.bin` 不包含 bootloader 和分区表。
+USB 烧录只写 `build/FoloToy-AI-Passport-full.bin`。名称相近的应用单镜像
+`build/FoloToy-AI-Passport.bin` 不包含 bootloader 和分区表；OTA 时则应上传这个
+应用单镜像，绝不能上传合并镜像。
+
+OTA 升级会保留 NVS。从 `0x0` 写入合并镜像会填充镜像之间的空隙，可能重置
+NVS 与 PHY data；日常升级应使用 OTA，合并镜像只用于首次初始化或有意完整刷新。
 
 ## 烧录与已存数据
 

@@ -2,6 +2,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -76,7 +77,16 @@ esp_err_t wifi_sta_start(const char *ssid, const char *pass) {
     if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) return e;
     e = esp_event_loop_create_default();
     if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) return e;
-    if (!esp_netif_create_default_wifi_sta()) return ESP_FAIL;
+    esp_netif_t *sta = esp_netif_create_default_wifi_sta();
+    if (!sta) return ESP_FAIL;
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char hostname[32];
+    snprintf(hostname, sizeof(hostname), "Passport-%02X%02X", mac[4], mac[5]);
+    e = esp_netif_set_hostname(sta, hostname);
+    if (e != ESP_OK) {
+        ESP_LOGW(TAG, "set hostname failed: %s", esp_err_to_name(e));
+    }
 
     const wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     e = esp_wifi_init(&init);

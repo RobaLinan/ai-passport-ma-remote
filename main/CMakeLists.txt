@@ -6,8 +6,9 @@ idf_component_register(
          "ma_client.c"
          "voice_client.c"
          "provisioning.c"
+         "ota_server.c"
     INCLUDE_DIRS "."
-    REQUIRES bsp lvgl esp_wifi esp_netif esp_event nvs_flash esp_http_client json esp_http_server
+    REQUIRES bsp lvgl esp_wifi esp_netif esp_event nvs_flash esp_http_client json esp_http_server app_update
     PRIV_REQUIRES esp_timer esp_hw_support esp_driver_usb_serial_jtag
 )
 

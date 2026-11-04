@@ -141,9 +141,9 @@ Example branches may change the same menu, configuration, or driver in incompati
 
 **ESP32-C3 · 8 MB Flash · no PSRAM · 240 × 320 display · three physical buttons**
 
-The default layout contains only **NVS, PHY data, and one factory application**
-spanning the remaining Flash. User firmware may use another valid 8 MB layout.
-See [firmware layout](development/engineering/firmware-layout.md).
+The current layout contains **NVS, OTA boot data, PHY data, and two OTA app
+slots** in the 8 MB Flash. User firmware may use another valid layout. See
+[firmware layout](development/engineering/firmware-layout.md).
 
 <details>
 <summary><strong>Expand the capability table</strong> — interfaces, limits, and implementation details</summary>
@@ -189,7 +189,7 @@ tools/                   Shared local/CI validation and firmware verification sc
 docs/                    Project docs, changelog, engineering/contribution rules, and design references
 .github/                 GitHub community files, PR template, issue forms, and CI workflows
 sdkconfig.defaults       ESP32-C3, USB console, Flash, and LVGL defaults
-partitions.csv           Minimal default: NVS, PHY data, and one factory application
+partitions.csv           NVS, OTA data, PHY data, and two OTA app slots
 dependencies.lock        Reproducible ESP-IDF Managed Component resolution
 AGENTS.md                Mandatory AI-agent entry point (paired with AGENTS.zh_CN.md)
 CLAUDE.md                Claude Code pointer to AGENTS.md (paired Chinese version)

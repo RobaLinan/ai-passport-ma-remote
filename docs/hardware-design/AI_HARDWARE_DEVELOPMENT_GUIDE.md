@@ -224,11 +224,12 @@ Accurate production SOC requires the cell parameters, CW2017 datasheet/vendor pr
 
 ## 10. Flash, console, and memory
 
-The default custom-firmware baseline uses 8 MB Flash. `sdkconfig.defaults` fixes the image to 8 MB and disables automatic flash-size header rewriting. By default, `partitions.csv` defines only 24 KB NVS, 4 KB PHY data, and one factory application from `0x10000` through the end of Flash (`0x7F0000` bytes). It has no OTA, device-identity, or unused reserved partition. User firmware may replace this default with another valid 8 MB partition layout. A detected non-8-MB device does not match this hardware baseline; identify the board and flash part before changing the project default.
+The custom-firmware baseline uses 8 MB Flash. `sdkconfig.defaults` fixes the image to 8 MB and disables automatic flash-size header rewriting. `partitions.csv` defines 24 KB NVS, 8 KB OTA boot data, 4 KB PHY data, and two `0x3F0000`-byte app slots at `0x20000` and `0x410000`. The first image with this layout is flashed over USB; later updates use the device OTA page. User firmware may replace this with another valid 8 MB partition layout. A detected non-8-MB device does not match this hardware baseline; identify the board and flash part before changing the project default.
 
 Writing the merged image at `0x0` may reset NVS because gaps are padded in the
-single file. Use segmented `idf.py flash` when stored application state must be
-preserved. See the [firmware layout](../development/engineering/firmware-layout.md).
+single file. OTA app updates preserve NVS; use segmented `idf.py flash` for
+development when stored state must be preserved. See the
+[firmware layout](../development/engineering/firmware-layout.md).
 
 The console is USB Serial/JTAG. Do not switch to the UART0 default output without resolving its GPIO21 conflict with the backlight.
 

@@ -26,14 +26,17 @@ It does not decode or play music.
 
 - 240x320 Now Playing UI: title, artist, album, progress, playback state, volume
   and battery.
-- Three key controls: OK play/pause, UP/DOWN volume, long UP/DOWN previous/next;
-  OK is also push-to-talk.
+- Three key controls: short OK play/pause, UP/DOWN volume in 5% steps, long
+  UP/DOWN previous/next; hold OK for 0.8 s for push-to-talk with a live mic
+  waveform. Players that report no volume use an estimated `~N` target.
 - SoftAP first-boot setup: an open `Passport-XXXX` AP serves a form at
   `http://192.168.4.1` for 2.4 GHz WiFi, MA host/port/token and bridge host/port.
 - LAN voice bridge: Home Assistant Assist STT (Nabu Casa Cloud, local Whisper,
   Wyoming, OpenAI-compatible or Azure), DeepSeek intent parsing and MA playback.
 - Player auto-resolution on boot and screen wake; idle dim, screen off and deep
   sleep with key wake. A connected USB host blocks deep sleep.
+- OTA app updates over the LAN from a browser, using two app slots. The first
+  OTA-capable image needs one USB flash; later updates keep NVS settings.
 
 ## Screenshots
 
@@ -46,8 +49,8 @@ It does not decode or play music.
 
 ## Repository layout
 
-- `main/`: application UI, configuration, MA client, WiFi, voice client and setup
-  portal.
+- `main/`: application UI, configuration, MA client, WiFi, voice client, setup
+  portal and OTA server.
 - `components/bsp/`: FoloToy board support (display, buttons, audio, battery).
 - `bridge/`: Python voice bridge and deployment documentation.
 - `assets/fonts/`: Noto Sans CJK SC subset (OFL) and the generation script.
@@ -63,15 +66,16 @@ idf.py --ccache build
 idf.py merge-bin
 ```
 
-Flash the merged image at `0x0` (a fresh NVS enters the setup AP):
+The partition table has two OTA app slots (`ota_0`/`ota_1`). Flash the merged
+image at `0x0` over USB once; after that, use the OTA page for updates:
 
 ```bash
 python -m esptool --chip esp32c3 -p /dev/ttyACM0 -b 460800 \
   write_flash 0x0 build/merged-binary.bin
 ```
 
-`./tools/validate.sh --firmware` also builds and verifies a merged image under
-`build/firmware/<sha>/`.
+A blank NVS enters the setup AP. `./tools/validate.sh --firmware` also builds
+and verifies a merged image under `build/firmware/<sha>/`.
 
 No compile-time secrets are required. `main/secrets.h` is an optional,
 gitignored development file; the setup AP collects runtime configuration.
@@ -84,8 +88,23 @@ gitignored development file; the setup AP collects runtime configuration.
 3. Save; the device reboots, connects to WiFi and starts polling MA.
 
 The MA token is stored in NVS. Use a dedicated, minimally scoped token rather
-than an admin token. To re-enter setup, erase NVS by flashing a full image at
-`0x0`.
+than an admin token. To re-enter setup, erase NVS with `esptool erase_flash`
+and then flash the merged image at `0x0`.
+
+## OTA updates
+
+While connected to WiFi, the device serves an upload page on port 80:
+
+1. Find the device address in the router's DHCP list (hostname
+   `Passport-XXXX`) or in the `OTA page: http://...` serial log line.
+2. Open `http://<device-ip>/`.
+3. Choose the app-only image `build/FoloToy-AI-Passport.bin` and upload it.
+
+The device writes the inactive OTA slot, verifies the image, switches the boot
+partition and reboots; NVS settings such as WiFi and MA configuration are
+preserved. Do not upload `build/merged-binary.bin` (that file also contains the
+bootloader and partition table). The OTA page has no authentication and is
+intended for a trusted LAN only.
 
 ## Voice bridge
 

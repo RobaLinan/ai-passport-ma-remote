@@ -4,22 +4,24 @@
 
 # Firmware Layout
 
-This repository is a minimal base for user-defined firmware targeting an
-ESP32-C3 with 8 MB Flash. Its default does not reserve product-specific
-identity, OTA, or unused data partitions.
+This repository targets an ESP32-C3 with 8 MB Flash. The current application
+uses two OTA app slots so the device can update over the LAN.
 
 ## Default layout
 
-The default partition table contains exactly:
+The default partition table contains:
 
 | Partition | Type/subtype | Offset | Size | Purpose |
 | --- | --- | ---: | ---: | --- |
 | `nvs` | data/NVS | `0x9000` | `0x6000` | ESP-IDF and application key-value storage |
-| `phy_init` | data/PHY | `0xF000` | `0x1000` | PHY initialization data |
-| `factory` | app/factory | `0x10000` | `0x7F0000` | The single application image; all remaining Flash |
+| `otadata` | data/OTA | `0xF000` | `0x2000` | OTA boot-selection data |
+| `phy_init` | data/PHY | `0x11000` | `0x1000` | PHY initialization data |
+| `ota_0` | app/ota_0 | `0x20000` | `0x3F0000` | First application slot |
+| `ota_1` | app/ota_1 | `0x410000` | `0x3F0000` | Second application slot |
 
-The default has no OTA slots. This is a starting point, not a restriction on
-user firmware.
+The first image with this layout must be written over USB at `0x0`. Later
+updates can use the device OTA page, which writes the inactive slot and keeps
+NVS settings.
 
 ## Custom layouts
 
@@ -51,9 +53,16 @@ images must fit entirely inside a configured partition; an offset inside that
 partition is allowed. Merely declaring a resource partition does not require a
 preloaded image, but listing an image in `flash_args` makes it mandatory.
 
-Upload only `build/FoloToy-AI-Passport-full.bin`; the similarly named app-only
-`build/FoloToy-AI-Passport.bin` does not contain the bootloader or partition
-table.
+For USB flashing, write only `build/FoloToy-AI-Passport-full.bin`; the
+similarly named app-only `build/FoloToy-AI-Passport.bin` does not contain the
+bootloader or partition table. For OTA, upload the app-only
+`build/FoloToy-AI-Passport.bin` through the device page; never upload the merged
+file there.
+
+OTA updates preserve NVS. A merged image written from `0x0` fills the gaps
+between images and can reset NVS and PHY data, so use OTA for ordinary updates
+and reserve the merged image for initial provisioning or intentional full
+refreshes.
 
 ## Flashing and stored data
 

@@ -21,6 +21,11 @@ LV_FONT_DECLARE(app_font_16);
 #define FONT_BODY  &app_font_16
 #define FONT_ICON  &lv_font_montserrat_14
 
+#define WAVE_BARS 9
+#define WAVE_BASELINE 110
+#define WAVE_MIN_H 4
+#define WAVE_MAX_EXTRA 9
+
 static lv_obj_t *s_state;
 static lv_obj_t *s_title;
 static lv_obj_t *s_artist;
@@ -32,6 +37,17 @@ static lv_obj_t *s_volume_value;
 static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_battery;
 static lv_obj_t *s_wifi;
+static lv_obj_t *s_wave[WAVE_BARS];
+
+static const uint8_t k_wave_curve[WAVE_BARS] = { 45, 70, 100, 80, 95, 60, 85, 75, 50 };
+
+static void wave_show(bool show) {
+    for (int i = 0; i < WAVE_BARS; i++) {
+        if (!s_wave[i]) continue;
+        if (show) lv_obj_remove_flag(s_wave[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_wave[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 static lv_obj_t *card_create(lv_obj_t *parent, int x, int y, int w, int h, int radius) {
     lv_obj_t *card = lv_obj_create(parent);
@@ -141,6 +157,20 @@ void app_ui_init(void) {
     s_duration = label_create(now, "--:--", FONT_BODY, UI_FAINT);
     lv_obj_align(s_duration, LV_ALIGN_TOP_RIGHT, -14, 124);
 
+    for (int i = 0; i < WAVE_BARS; i++) {
+        lv_obj_t *bar = lv_obj_create(now);
+        lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_pos(bar, 72 + i * 9, WAVE_BASELINE - WAVE_MIN_H);
+        lv_obj_set_size(bar, 4, WAVE_MIN_H);
+        lv_obj_set_style_radius(bar, 2, 0);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(UI_ACCENT), 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(bar, 0, 0);
+        lv_obj_set_style_pad_all(bar, 0, 0);
+        lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+        s_wave[i] = bar;
+    }
+
     lv_obj_t *volume = card_create(scr, 10, 204, 220, 56, 14);
     lv_obj_t *volume_icon = label_create(volume, LV_SYMBOL_VOLUME_MAX, FONT_ICON, UI_MUTED);
     lv_obj_set_pos(volume_icon, 14, 12);
@@ -169,6 +199,7 @@ void app_ui_set_playing(bool playing) {
 
 void app_ui_set_track(const char *title, const char *subtitle, const char *player,
                       bool playing, int elapsed_s, int duration_s) {
+    wave_show(false);
     lv_label_set_text(s_title, title && title[0] ? title : "暂无播放");
     lv_label_set_text(s_artist, subtitle && subtitle[0] ? subtitle : "");
     lv_label_set_text(s_player, player ? player : "");
@@ -182,6 +213,7 @@ void app_ui_set_track(const char *title, const char *subtitle, const char *playe
 }
 
 void app_ui_set_message(const char *headline, const char *detail) {
+    wave_show(false);
     lv_label_set_text(s_title, headline ? headline : "");
     lv_label_set_text(s_artist, detail ? detail : "");
     set_playing_icon(false);
@@ -191,6 +223,10 @@ void app_ui_set_message(const char *headline, const char *detail) {
 }
 
 void app_ui_set_volume(int volume) {
+    app_ui_set_volume_ex(volume, false);
+}
+
+void app_ui_set_volume_ex(int volume, bool estimated) {
     if (volume < 0) {
         lv_label_set_text(s_volume_value, "--");
         lv_bar_set_value(s_volume_bar, 0, LV_ANIM_OFF);
@@ -198,10 +234,42 @@ void app_ui_set_volume(int volume) {
     }
     if (volume > 100) volume = 100;
     lv_bar_set_value(s_volume_bar, volume, LV_ANIM_OFF);
-    lv_label_set_text_fmt(s_volume_value, "%d", volume);
+    if (estimated) lv_label_set_text_fmt(s_volume_value, "~%d", volume);
+    else lv_label_set_text_fmt(s_volume_value, "%d", volume);
+}
+
+void app_ui_set_listening(bool listening) {
+    wave_show(listening);
+    if (listening) app_ui_set_audio_level(0);
+}
+
+void app_ui_set_audio_level(int level) {
+    if (level < 0) level = 0;
+    if (level > 100) level = 100;
+    for (int i = 0; i < WAVE_BARS; i++) {
+        if (!s_wave[i]) continue;
+        const int extra = level * k_wave_curve[i] * WAVE_MAX_EXTRA / 10000;
+        const int h = WAVE_MIN_H + extra;
+        lv_obj_set_size(s_wave[i], 4, h);
+        lv_obj_set_pos(s_wave[i], 72 + i * 9, WAVE_BASELINE - h);
+    }
+}
+
+void app_ui_set_ota_progress(int percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    wave_show(false);
+    lv_label_set_text(s_title, "正在升级");
+    lv_label_set_text(s_artist, "请勿断电");
+    lv_label_set_text(s_player, "");
+    set_playing_icon(false);
+    lv_bar_set_value(s_progress, percent, LV_ANIM_OFF);
+    lv_label_set_text_fmt(s_elapsed, "%d%%", percent);
+    lv_label_set_text(s_duration, "");
 }
 
 void app_ui_set_provisioning(const char *ap_ssid) {
+    wave_show(false);
     lv_label_set_text(s_title, "配网模式");
     lv_label_set_text_fmt(s_artist, "连接热点 %s", ap_ssid ? ap_ssid : "");
     lv_label_set_text(s_player, "打开 192.168.4.1");

@@ -19,12 +19,15 @@ static const char *TAG = "voice";
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_MAX_SECONDS 5
 #define VOICE_TOTAL_BYTES (VOICE_SAMPLE_RATE * 2 * VOICE_MAX_SECONDS)
-#define VOICE_PREBUF_BYTES 20000
+// 0.9 s at 16 kHz/16-bit. Covers the 800 ms long-press threshold plus input
+// dispatch latency, so a short OK press is cancelled before any upload starts.
+#define VOICE_PREBUF_BYTES 28672
 #define VOICE_CHUNK_BYTES 2048
 #define VOICE_EVENT_QUEUE_DEPTH 4
 
 typedef enum {
     VOICE_EV_START = 0,
+    VOICE_EV_LISTENING,
     VOICE_EV_COMMIT,
     VOICE_EV_STOP,
     VOICE_EV_CANCEL,
@@ -32,6 +35,7 @@ typedef enum {
 
 typedef struct {
     voice_event_type_t type;
+    uint32_t seq;
     char player_id[96];
     char queue_id[96];
 } voice_event_t;
@@ -41,6 +45,7 @@ static QueueHandle_t s_events;
 static bool s_audio_ok;
 static volatile bool s_busy;
 static volatile int64_t s_ui_hold_until_us;
+static uint32_t s_generation;
 
 static void ui_msg(const char *headline, const char *detail) {
     if (bsp_lvgl_lock(300)) {
@@ -53,19 +58,73 @@ static void ui_hold(int ms) {
     s_ui_hold_until_us = esp_timer_get_time() + (int64_t)ms * 1000;
 }
 
-static void drain_events(void) {
-    voice_event_t ev;
-    if (!s_events) return;
-    while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
-    }
-}
-
 static void send_event(voice_event_type_t type, const char *player_id, const char *queue_id) {
     if (!s_events) return;
-    voice_event_t ev = { .type = type };
+    voice_event_t ev = { .type = type, .seq = s_generation };
     if (player_id) snprintf(ev.player_id, sizeof(ev.player_id), "%s", player_id);
     if (queue_id) snprintf(ev.queue_id, sizeof(ev.queue_id), "%s", queue_id);
     (void)xQueueSend(s_events, &ev, 0);
+}
+
+static void show_listening(void) {
+    if (bsp_lvgl_lock(300)) {
+        app_ui_set_message("正在听", "松开结束");
+        app_ui_set_listening(true);
+        bsp_lvgl_unlock();
+    }
+}
+
+static void hide_wave(void) {
+    if (bsp_lvgl_lock(100)) {
+        app_ui_set_listening(false);
+        bsp_lvgl_unlock();
+    }
+}
+
+static int pcm_peak(const uint8_t *buf, size_t len) {
+    const int16_t *samples = (const int16_t *)buf;
+    int peak = 0;
+    for (size_t i = 0; i < len / 2; i++) {
+        int v = samples[i];
+        if (v < 0) v = -v;
+        if (v > peak) peak = v;
+    }
+    return peak;
+}
+
+static int pcm_level(const uint8_t *buf, size_t len) {
+    const int peak = pcm_peak(buf, len);
+    if (peak < 180) return 0;
+    const int level = peak / 128;
+    return level > 100 ? 100 : level;
+}
+
+static void update_wave(const uint8_t *buf, size_t len, int64_t *last_us) {
+    const int64_t now = esp_timer_get_time();
+    if (now - *last_us < 80000) return;
+    *last_us = now;
+    const int level = pcm_level(buf, len);
+    if (bsp_lvgl_lock(30)) {
+        app_ui_set_audio_level(level);
+        bsp_lvgl_unlock();
+    }
+}
+
+static void consume_events(uint32_t seq, bool *listening, bool *done, bool *cancel) {
+    voice_event_t ev;
+    while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
+        if (ev.seq != seq) continue;
+        if (ev.type == VOICE_EV_LISTENING) {
+            if (!*listening) {
+                *listening = true;
+                show_listening();
+            }
+        } else if (ev.type == VOICE_EV_COMMIT || ev.type == VOICE_EV_STOP) {
+            *done = true;
+        } else if (ev.type == VOICE_EV_CANCEL) {
+            *cancel = true;
+        }
+    }
 }
 
 static bool audio_begin(void) {
@@ -99,7 +158,6 @@ static void report_result(bool ok, const char *display, const char *transcript,
 
 static void run_ptt(const voice_event_t *start, uint8_t *prebuf) {
     s_busy = true;
-    ui_msg("正在听", "松开结束");
 
     const int64_t audio_t0 = esp_timer_get_time();
     const bool audio_started = audio_begin();
@@ -110,63 +168,62 @@ static void run_ptt(const voice_event_t *start, uint8_t *prebuf) {
         ui_msg("麦克风不可用", "检查音频");
         ui_hold(2500);
         s_busy = false;
-        drain_events();
         return;
     }
 
-    bool committed = false;
-    bool stop = false;
+    bool listening = false;
+    bool prebuf_full = false;
+    bool done = false;
     bool cancel = false;
     size_t pre_len = 0;
+    int64_t last_wave_us = 0;
 
-    while (!committed && !stop && !cancel) {
-        voice_event_t ev;
-        while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
-            if (ev.type == VOICE_EV_COMMIT) committed = true;
-            else if (ev.type == VOICE_EV_STOP) stop = true;
-            else if (ev.type == VOICE_EV_CANCEL) cancel = true;
-        }
-        if (committed || stop || cancel) break;
+    while (!done && !cancel) {
+        consume_events(start->seq, &listening, &done, &cancel);
+        if (done || cancel) break;
 
-        size_t room = VOICE_PREBUF_BYTES - pre_len;
-        size_t chunk = room < VOICE_CHUNK_BYTES ? room : VOICE_CHUNK_BYTES;
-        if (chunk == 0) {
-            committed = true;
+        if (!prebuf_full) {
+            size_t room = VOICE_PREBUF_BYTES - pre_len;
+            size_t chunk = room < VOICE_CHUNK_BYTES ? room : VOICE_CHUNK_BYTES;
+            if (bsp_audio_read(prebuf + pre_len, chunk) != ESP_OK) {
+                ESP_LOGE(TAG, "audio read failed");
+                hide_wave();
+                audio_end();
+                ui_msg("录音失败", "请重试");
+                ui_hold(2500);
+                s_busy = false;
+                return;
+            }
+            if (listening) update_wave(prebuf + pre_len, chunk, &last_wave_us);
+            pre_len += chunk;
+            if (pre_len >= VOICE_PREBUF_BYTES) prebuf_full = true;
+        } else if (listening) {
+            // Buffer is full and the long-press was recognized: start the
+            // upload and keep streaming live audio while the key is held.
             break;
+        } else {
+            // Do not upload before the long-press event: a short press must
+            // remain a play/pause click and never reach the bridge.
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
-        if (bsp_audio_read(prebuf + pre_len, chunk) != ESP_OK) {
-            ESP_LOGE(TAG, "audio read failed");
-            audio_end();
-            ui_msg("录音失败", "请重试");
-            ui_hold(2500);
-            s_busy = false;
-            drain_events();
-            return;
-        }
-        pre_len += chunk;
-        if (pre_len >= VOICE_PREBUF_BYTES) committed = true;
     }
 
-    if (cancel || (stop && !committed)) {
-        ESP_LOGI(TAG, "ptt cancelled: prebuf=%u committed=%d stop=%d",
-                 (unsigned)pre_len, committed, stop);
+    if (cancel) {
+        ESP_LOGI(TAG, "ptt cancelled: prebuf=%u", (unsigned)pre_len);
+        hide_wave();
         audio_end();
         s_busy = false;
-        drain_events();
         return;
     }
 
-    int peak = 0;
-    const int16_t *samples = (const int16_t *)prebuf;
-    for (size_t i = 0; i < pre_len / 2; i++) {
-        int v = samples[i];
-        if (v < 0) v = -v;
-        if (v > peak) peak = v;
+    const bool live = !done;
+    bool recognizing = false;
+    if (done) {
+        ui_msg("识别中", "请稍候");
+        recognizing = true;
     }
-    ESP_LOGI(TAG, "prebuf=%u bytes peak=%d committed=%d stop=%d",
-             (unsigned)pre_len, peak, committed, stop);
-
-    ui_msg("识别中", "请稍候");
+    ESP_LOGI(TAG, "prebuf=%u bytes peak=%d live=%d",
+             (unsigned)pre_len, pcm_peak(prebuf, pre_len), live);
 
     char url[300];
     if (start->queue_id[0]) {
@@ -210,15 +267,21 @@ static void run_ptt(const voice_event_t *start, uint8_t *prebuf) {
         }
     }
 
+    consume_events(start->seq, &listening, &done, &cancel);
+    if (cancel) {
+        if (opened) esp_http_client_close(client);
+        if (client) esp_http_client_cleanup(client);
+        hide_wave();
+        audio_end();
+        s_busy = false;
+        return;
+    }
+
     static const uint8_t silence[VOICE_CHUNK_BYTES];
     uint8_t chunk[VOICE_CHUNK_BYTES];
-    while (!failed && !stop && !cancel && sent < VOICE_TOTAL_BYTES) {
-        voice_event_t ev;
-        while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
-            if (ev.type == VOICE_EV_STOP) stop = true;
-            else if (ev.type == VOICE_EV_CANCEL) cancel = true;
-        }
-        if (stop || cancel) break;
+    while (!failed && live && !done && !cancel && sent < VOICE_TOTAL_BYTES) {
+        consume_events(start->seq, &listening, &done, &cancel);
+        if (done || cancel) break;
 
         size_t want = VOICE_TOTAL_BYTES - sent;
         if (want > sizeof(chunk)) want = sizeof(chunk);
@@ -227,12 +290,27 @@ static void run_ptt(const voice_event_t *start, uint8_t *prebuf) {
             failed = true;
             break;
         }
+        update_wave(chunk, want, &last_wave_us);
         if (esp_http_client_write(client, (const char *)chunk, (int)want) !=
             (int)want) {
             failed = true;
             break;
         }
         sent += want;
+    }
+
+    if (cancel) {
+        if (opened) esp_http_client_close(client);
+        if (client) esp_http_client_cleanup(client);
+        hide_wave();
+        audio_end();
+        s_busy = false;
+        return;
+    }
+
+    if (!recognizing) {
+        ui_msg("识别中", "请稍候");
+        recognizing = true;
     }
 
     while (!failed && sent < VOICE_TOTAL_BYTES) {
@@ -298,7 +376,6 @@ static void run_ptt(const voice_event_t *start, uint8_t *prebuf) {
     }
 
     s_busy = false;
-    drain_events();
 }
 
 static void voice_task(void *arg) {
@@ -338,8 +415,14 @@ esp_err_t voice_client_init(const app_config_t *cfg) {
 }
 
 void voice_client_start(const char *player_id, const char *queue_id) {
-    if (s_busy) return;
+    if (s_busy || !s_events) return;
+    (void)xQueueReset(s_events);
+    s_generation++;
     send_event(VOICE_EV_START, player_id, queue_id);
+}
+
+void voice_client_listening(void) {
+    send_event(VOICE_EV_LISTENING, NULL, NULL);
 }
 
 void voice_client_commit(void) {

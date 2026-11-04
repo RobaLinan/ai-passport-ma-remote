@@ -22,12 +22,14 @@
 ## 功能
 
 - 240×320 Now Playing 界面：歌名、歌手、专辑、进度、播放状态、音量和电量。
-- 三键操作：OK 播放/暂停，上/下音量，长按上/下上一首/下一首；OK 同时用于按住说话。
+- 三键操作：短按 OK 播放/暂停，上/下音量按 5% 步进，长按上/下上一首/下一首；
+  长按 OK 0.8 秒进入按住说话，屏幕显示麦克风波形。无音量反馈的设备用 `~N` 表示估算值。
 - 首次开机 SoftAP 配网：开放热点 `Passport-XXXX`，浏览器打开
   `http://192.168.4.1`，填写 2.4GHz WiFi、MA 地址/端口/token、bridge 地址/端口。
 - 局域网语音 bridge：Home Assistant Assist STT（Nabu Casa Cloud、本地 Whisper、
   Wyoming、OpenAI 兼容接口或 Azure）、DeepSeek 意图解析和 MA 播放。
 - 开机和亮屏唤醒时自动解析播放器；空闲调暗、熄屏、按键唤醒深睡；连接 USB 主机时不深睡。
+- 局域网浏览器 OTA 升级，使用双 app 分区。首次需要 USB 烧录一次，之后升级保留 NVS 配置。
 
 ## 界面截图
 
@@ -40,7 +42,7 @@
 
 ## 目录结构
 
-- `main/`：应用 UI、配置、MA 客户端、WiFi、语音客户端和配网页面。
+- `main/`：应用 UI、配置、MA 客户端、WiFi、语音客户端、配网页面和 OTA 服务。
 - `components/bsp/`：FoloToy 板级支持（显示、按键、音频、电量）。
 - `bridge/`：Python 语音 bridge 和部署文档。
 - `assets/fonts/`：Noto Sans CJK SC 子集（OFL）和生成脚本。
@@ -56,15 +58,16 @@ idf.py --ccache build
 idf.py merge-bin
 ```
 
-把合并镜像烧到 `0x0`（NVS 为空时会进入配网 AP）：
+分区表包含两个 OTA app 分区（`ota_0`/`ota_1`）。先用 USB 把合并镜像烧到
+`0x0` 一次；之后通过 OTA 页面升级：
 
 ```bash
 python -m esptool --chip esp32c3 -p /dev/ttyACM0 -b 460800 \
   write_flash 0x0 build/merged-binary.bin
 ```
 
-`./tools/validate.sh --firmware` 也会构建并校验一个合并镜像，产物在
-`build/firmware/<sha>/`。
+NVS 为空时会进入配网 AP。`./tools/validate.sh --firmware` 也会构建并校验一个
+合并镜像，产物在 `build/firmware/<sha>/`。
 
 构建不需要内置任何密钥。`main/secrets.h` 只是可选的、被 gitignore 的开发文件；
 运行时配置由配网 AP 收集。
@@ -76,7 +79,20 @@ python -m esptool --chip esp32c3 -p /dev/ttyACM0 -b 460800 \
 3. 保存后设备重启、连接 WiFi 并开始轮询 MA。
 
 MA token 保存在 NVS；请使用最小权限的专用 token，不要使用 admin token。
-需要重新配网时，用整片镜像重新烧录 `0x0` 擦除 NVS。
+需要重新配网时，先用 `esptool erase_flash` 擦除，再把合并镜像烧到 `0x0`。
+
+## OTA 升级
+
+设备连接 WiFi 后会在 80 端口提供升级页面：
+
+1. 在路由器 DHCP 列表里找到设备地址（主机名 `Passport-XXXX`），或看串口日志里的
+   `OTA page: http://...`。
+2. 浏览器打开 `http://<设备IP>/`。
+3. 选择 app 镜像 `build/FoloToy-AI-Passport.bin` 上传。
+
+设备会写入非当前 OTA 分区、校验镜像、切换启动分区并重启；WiFi、MA 等 NVS
+配置会保留。不要上传 `build/merged-binary.bin`（它还包含 bootloader 和分区表）。
+OTA 页面没有鉴权，只应在可信局域网使用。
 
 ## 语音 bridge
 
