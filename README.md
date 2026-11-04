@@ -9,6 +9,13 @@ The device is a controller only: it shows what is playing, sends transport and
 volume commands, and supports push-to-talk voice requests through a local bridge.
 It does not decode or play music.
 
+> [!IMPORTANT]
+> **Scope:** The AI Passport firmware itself provides only basic playback
+> control: play/pause, previous/next and volume. Voice requests are recorded on
+> the device, but intent handling runs on the backend bridge. The bridge
+> currently supports only simple lookups (artist or playlist names, plus random
+> playback); more complex voice commands require editing its intent prompt.
+
 <p align="center">
   <img src="assets/images/ma-remote-banner.png" width="440"
        alt="AI Passport Music Assistant remote illustration">

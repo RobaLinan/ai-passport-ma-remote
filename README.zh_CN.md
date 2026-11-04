@@ -8,6 +8,11 @@
 显示当前播放内容、发送播放/音量和切歌命令，并通过局域网 bridge 支持按住说话。
 设备本身不解码、不播放音乐。
 
+> [!IMPORTANT]
+> **功能边界：** AI Passport 固件本身只提供简单的播放控制：播放/暂停、切歌和音量。
+> 语音请求由设备录音，但意图解析和播放决策在后台 bridge 中完成。bridge 目前只支持
+> 简单的名称查找（歌手或歌单名，以及随机播放）；更复杂的语音指令需要自行修改它的 prompt。
+
 <p align="center">
   <img src="assets/images/ma-remote-banner.png" width="440"
        alt="AI Passport Music Assistant 遥控器示意图">
