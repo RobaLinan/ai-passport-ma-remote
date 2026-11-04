@@ -14,7 +14,8 @@ It does not decode or play music.
 > control: play/pause, previous/next and volume. Voice requests are recorded on
 > the device, but intent handling runs on the backend bridge. The bridge
 > currently supports only simple lookups (artist or playlist names, plus random
-> playback); more complex voice commands require editing its intent prompt.
+> playback); more complex voice commands require editing
+> `bridge/intent_prompt.txt`.
 
 <p align="center">
   <img src="assets/images/ma-remote-banner.png" width="440"

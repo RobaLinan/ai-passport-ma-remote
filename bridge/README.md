@@ -72,6 +72,17 @@ The device sends 5 seconds of PCM per press-to-talk gesture (padded with silence
 `DEBUG_AUDIO=1` saves the last clip to `/tmp/last_voice.pcm`/`.wav` and logs the
 peak/RMS; it is off by default.
 
+## Customizing intents
+
+The DeepSeek system prompt is `intent_prompt.txt` next to `bridge.py`; keep that
+file alongside the script when deploying. Edit it and restart the service, or
+set `INTENT_PROMPT_FILE` to use a different path.
+
+The prompt must keep returning the JSON contract understood by the bridge:
+`play_media` with `media_type` `artist` or `playlist` and 1-3 `queries`,
+`play_random`, or `unsupported`. Changing that contract also requires updating
+`parse_intent()` and the command handlers.
+
 ## systemd (user service)
 
 ```bash
@@ -107,8 +118,8 @@ player. The device also re-resolves its own target on boot and screen wake.
 
 ## Notes
 
-- The intent prompt and UI are Chinese; set `STT_LANGUAGE` to your STT language
-  (the old `HA_LANGUAGE` still works).
+- The intent prompt (`intent_prompt.txt`) and UI are Chinese; set `STT_LANGUAGE`
+  to your STT language (the old `HA_LANGUAGE` still works).
 - `ha` picks an Assist pipeline by language; `nabucasa` only accepts the Nabu
   Casa Cloud engine and fails with the available engine list if none matches.
 - Artist aliases are handled by asking DeepSeek for translated/original candidate

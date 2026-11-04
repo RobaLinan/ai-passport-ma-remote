@@ -61,6 +61,15 @@ chmod 600 .env secrets/*
 
 设备每次按住说话上传 5 秒 PCM（不足补静音）。`DEBUG_AUDIO=1` 会把最后一段存到 `/tmp/last_voice.pcm/.wav` 并打印峰值；默认关闭。
 
+## 自定义意图
+
+DeepSeek 的系统提示词在 `bridge.py` 同目录的 `intent_prompt.txt`；部署时请把这个文件
+和脚本放在一起。修改后重启服务，也可以用 `INTENT_PROMPT_FILE` 指向其他路径。
+
+提示词必须保持 bridge 能解析的 JSON 契约：`play_media` 配 `media_type` `artist` 或
+`playlist` 和 1-3 个 `queries`，或 `play_random`、`unsupported`。如果修改契约，
+还需要同步修改 `parse_intent()` 和命令执行逻辑。
+
 ## systemd（user 服务）
 
 ```bash
@@ -89,7 +98,7 @@ Passport 首次开机进入 `Passport-XXXX` 配网热点，在 `192.168.4.1` 填
 
 ## 说明
 
-- 意图提示词和界面是中文；用 `STT_LANGUAGE` 匹配你的 STT 语言（旧配置里的 `HA_LANGUAGE` 仍兼容）。
+- 意图提示词（`intent_prompt.txt`）和界面是中文；用 `STT_LANGUAGE` 匹配你的 STT 语言（旧配置里的 `HA_LANGUAGE` 仍兼容）。
 - `ha` 模式下按语言自动挑选 Assist pipeline；`nabucasa` 只接受 Nabu Casa Cloud 引擎，找不到会直接报错并列出可用引擎。
 - 歌手别名由 DeepSeek 生成译名/原名候选，再在 MA 库里搜索。
 - 随机播放优先用最近播放的 track，不足时回退到最近添加并过滤 1–10 分钟。

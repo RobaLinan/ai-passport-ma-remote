@@ -49,18 +49,10 @@ DEBUG_AUDIO = os.environ.get("DEBUG_AUDIO", "0") in ("1", "true", "yes")
 PORT = int(os.environ.get("PORT", "8096"))
 MAX_PCM_BYTES = 2 * 1024 * 1024
 
-INTENT_PROMPT = """你是音乐遥控器。把用户的话转换成 JSON，只输出 JSON。
-格式: {"intent":"play_media","media_type":"artist","queries":["候选1","候选2"]}
-或:   {"intent":"play_media","media_type":"playlist","queries":["候选1"]}
-只有用户想播放某位歌手或某个歌单时才用 play_media。
-如果用户想“随机播放/随便放首歌/来点音乐/播放一个随机的歌”，输出 {"intent":"play_random"}。
-其他意图输出 {"intent":"unsupported"}。
-queries 是 1-3 个搜索词，按优先级排列，只包含歌手/歌单名称，去掉“播放、放、来点、的歌、歌单”等词和标点。
-规则：
-- 用户原话中的名字必须保留在 queries 里。
-- 如果用户说的是外国歌手/乐队的中文译名（例如“老鹰乐队”），把常用英文/原名放第一位，并保留中文名在最后，例如 ["Eagles","The Eagles","老鹰乐队"]。
-- 中文歌手保持中文名在前；不确定时不要翻译，保留原名。
-不要解释，不要输出多余字段。"""
+BRIDGE_DIR = Path(__file__).resolve().parent
+INTENT_PROMPT_FILE = Path(
+    os.environ.get("INTENT_PROMPT_FILE", str(BRIDGE_DIR / "intent_prompt.txt"))
+).expanduser()
 
 
 def read_secret(value_env: str, file_env: str, default_file: str) -> str:
@@ -80,6 +72,18 @@ def read_optional_secret(value_env: str, file_env: str, default_file: str) -> st
         return Path(path).read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return ""
+
+
+def load_intent_prompt() -> str:
+    try:
+        prompt = INTENT_PROMPT_FILE.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot read intent prompt {INTENT_PROMPT_FILE}: {exc}"
+        ) from exc
+    if not prompt:
+        raise RuntimeError(f"intent prompt is empty: {INTENT_PROMPT_FILE}")
+    return prompt
 
 
 def pcm_to_wav(pcm: bytes) -> bytes:
@@ -135,8 +139,13 @@ class Bridge:
         self.session: ClientSession | None = None
         self.pipeline_id: str | None = None
         self.pipeline_name = ""
+        self.intent_prompt = ""
 
     async def start(self):
+        self.intent_prompt = load_intent_prompt()
+        log.info(
+            "intent prompt: %s (%d chars)", INTENT_PROMPT_FILE, len(self.intent_prompt)
+        )
         if STT_PROVIDER not in STT_PROVIDERS:
             raise RuntimeError(
                 f"unknown STT_PROVIDER '{STT_PROVIDER}' (use one of: {', '.join(STT_PROVIDERS)})"
@@ -462,7 +471,7 @@ class Bridge:
         payload = {
             "model": DEEPSEEK_MODEL,
             "messages": [
-                {"role": "system", "content": INTENT_PROMPT},
+                {"role": "system", "content": self.intent_prompt},
                 {"role": "user", "content": text},
             ],
             "temperature": 0,
