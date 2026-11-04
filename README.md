@@ -9,6 +9,13 @@ The device is a controller only: it shows what is playing, sends transport and
 volume commands, and supports push-to-talk voice requests through a local bridge.
 It does not decode or play music.
 
+<p align="center">
+  <img src="assets/images/ma-remote-ui.png" width="440"
+       alt="FoloToy AI Passport running the Music Assistant remote UI">
+</p>
+
+*UI mockup: the 240x320 Now Playing screen rendered from the firmware layout.*
+
 ## Features
 
 - 240x320 Now Playing UI: title, artist, album, progress, playback state, volume

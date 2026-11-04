@@ -8,6 +8,13 @@
 显示当前播放内容、发送播放/音量和切歌命令，并通过局域网 bridge 支持按住说话。
 设备本身不解码、不播放音乐。
 
+<p align="center">
+  <img src="assets/images/ma-remote-ui.png" width="440"
+       alt="运行 Music Assistant 遥控器界面的 FoloToy AI Passport">
+</p>
+
+*界面示意图：按固件布局渲染的 240×320 Now Playing 界面。*
+
 ## 功能
 
 - 240×320 Now Playing 界面：歌名、歌手、专辑、进度、播放状态、音量和电量。
