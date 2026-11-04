@@ -1,0 +1,15 @@
+[Unit]
+Description=Music Assistant Passport voice bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ma-bridge
+EnvironmentFile=%h/ma-bridge/.env
+ExecStart=%h/ma-bridge/.venv/bin/python %h/ma-bridge/bridge.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
