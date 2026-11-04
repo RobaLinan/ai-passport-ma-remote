@@ -10,11 +10,9 @@ volume commands, and supports push-to-talk voice requests through a local bridge
 It does not decode or play music.
 
 <p align="center">
-  <img src="assets/images/ma-remote-ui.png" width="440"
-       alt="FoloToy AI Passport running the Music Assistant remote UI">
+  <img src="assets/images/ma-remote-banner.png" width="440"
+       alt="AI Passport Music Assistant remote illustration">
 </p>
-
-*UI mockup: the 240x320 Now Playing screen rendered from the firmware layout.*
 
 ## Features
 
@@ -28,6 +26,15 @@ It does not decode or play music.
   Wyoming, OpenAI-compatible or Azure), DeepSeek intent parsing and MA playback.
 - Player auto-resolution on boot and screen wake; idle dim, screen off and deep
   sleep with key wake. A connected USB host blocks deep sleep.
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/images/ma-remote-ui.png" width="380"
+       alt="FoloToy AI Passport running the Music Assistant remote UI">
+</p>
+
+*UI mockup: the 240x320 Now Playing screen rendered from the firmware layout.*
 
 ## Repository layout
 

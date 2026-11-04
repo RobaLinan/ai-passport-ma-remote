@@ -9,11 +9,9 @@
 设备本身不解码、不播放音乐。
 
 <p align="center">
-  <img src="assets/images/ma-remote-ui.png" width="440"
-       alt="运行 Music Assistant 遥控器界面的 FoloToy AI Passport">
+  <img src="assets/images/ma-remote-banner.png" width="440"
+       alt="AI Passport Music Assistant 遥控器示意图">
 </p>
-
-*界面示意图：按固件布局渲染的 240×320 Now Playing 界面。*
 
 ## 功能
 
@@ -24,6 +22,15 @@
 - 局域网语音 bridge：Home Assistant Assist STT（Nabu Casa Cloud、本地 Whisper、
   Wyoming、OpenAI 兼容接口或 Azure）、DeepSeek 意图解析和 MA 播放。
 - 开机和亮屏唤醒时自动解析播放器；空闲调暗、熄屏、按键唤醒深睡；连接 USB 主机时不深睡。
+
+## 界面截图
+
+<p align="center">
+  <img src="assets/images/ma-remote-ui.png" width="380"
+       alt="运行 Music Assistant 遥控器界面的 FoloToy AI Passport">
+</p>
+
+*界面示意图：按固件布局渲染的 240×320 Now Playing 界面。*
 
 ## 目录结构
 
