@@ -13,9 +13,9 @@ It does not decode or play music.
 > **Scope:** The AI Passport firmware itself provides only basic playback
 > control: play/pause, previous/next and volume. Voice requests are recorded on
 > the device, but intent handling runs on the backend bridge. The bridge
-> currently supports only simple lookups (artist or playlist names, plus random
-> playback); more complex voice commands require editing
-> `bridge/intent_prompt.txt`.
+> currently supports artist, album, track, genre and playlist lookups, random
+> playback, and voice-requested shuffle; more complex voice commands require
+> editing `bridge/intent_prompt.txt`.
 
 <p align="center">
   <img src="assets/images/ma-remote-banner.png" width="440"

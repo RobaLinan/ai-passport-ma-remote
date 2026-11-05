@@ -48,6 +48,13 @@ BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "")
 DEBUG_AUDIO = os.environ.get("DEBUG_AUDIO", "0") in ("1", "true", "yes")
 PORT = int(os.environ.get("PORT", "8096"))
 MAX_PCM_BYTES = 2 * 1024 * 1024
+MEDIA_TYPE_KEYS = {
+    "artist": "artists",
+    "album": "albums",
+    "track": "tracks",
+    "playlist": "playlists",
+    "genre": "genres",
+}
 
 BRIDGE_DIR = Path(__file__).resolve().parent
 INTENT_PROMPT_FILE = Path(
@@ -491,14 +498,18 @@ class Bridge:
             data = json.loads(body)
         content = data["choices"][0]["message"]["content"]
         intent = json.loads(content)
+        if not isinstance(intent, dict):
+            raise RuntimeError(f"unsupported intent payload: {intent}")
         if intent.get("intent") not in ("play_media", "play_random", "unsupported"):
             raise RuntimeError(f"unsupported intent payload: {intent}")
         if intent.get("intent") == "play_media":
-            if intent.get("media_type") not in ("artist", "playlist"):
+            if intent.get("media_type") not in MEDIA_TYPE_KEYS:
                 raise RuntimeError(f"bad media_type: {intent.get('media_type')}")
             raw_queries = intent.get("queries")
             if not raw_queries:
                 raw_queries = [intent.get("query", "")]
+            if not isinstance(raw_queries, (list, tuple)):
+                raw_queries = [raw_queries]
             queries = []
             for item in raw_queries:
                 value = str(item).strip()
@@ -507,6 +518,16 @@ class Bridge:
             if not queries:
                 raise RuntimeError("empty query")
             intent["queries"] = queries[:3]
+            media_type = intent["media_type"]
+            artist = str(intent.get("artist") or "").strip()
+            if artist and media_type in ("track", "album"):
+                intent["artist"] = artist
+            else:
+                intent.pop("artist", None)
+            shuffle = intent.get("shuffle")
+            if isinstance(shuffle, str):
+                shuffle = shuffle.strip().lower() in ("1", "true", "yes", "on")
+            intent["shuffle"] = bool(shuffle) and media_type != "track"
         return intent
 
     async def resolve_target(self, player_id: str | None, queue_id: str | None):
@@ -572,7 +593,7 @@ class Bridge:
                 "ok": False,
                 "transcript": text,
                 "intent": "unsupported",
-                "error": "V1 only supports play artist/playlist",
+                "error": "unsupported command (voice plays artist/album/track/genre/playlist)",
             }
 
         if intent.get("intent") == "play_random":
@@ -636,54 +657,156 @@ class Bridge:
 
         media_type = intent["media_type"]
         queries = intent["queries"]
+        artist_hint = intent.get("artist") or ""
+        shuffle = bool(intent.get("shuffle"))
         pid, qid = await self.resolve_target(player_id, queue_id)
-        key = "artists" if media_type == "artist" else "playlists"
+        key = MEDIA_TYPE_KEYS[media_type]
 
         def norm(value: str) -> str:
             return "".join(value.casefold().split())
 
+        def artists_of(item: dict) -> list[str]:
+            return [
+                str(artist.get("name"))
+                for artist in (item.get("artists") or [])
+                if isinstance(artist, dict) and artist.get("name")
+            ]
+
+        def artist_matches(item: dict) -> bool:
+            if not artist_hint:
+                return False
+            hint = norm(artist_hint)
+            return any(
+                hint == norm(name) or hint in norm(name) or norm(name) in hint
+                for name in artists_of(item)
+            )
+
+        def pick_exact(candidates: list[dict]):
+            if artist_hint:
+                for item in candidates:
+                    if artist_matches(item):
+                        return item
+                if media_type == "track":
+                    return None
+            return candidates[0] if candidates else None
+
+        def pick_partial(candidates: list[dict]):
+            if artist_hint:
+                return next(
+                    (item for item in candidates if artist_matches(item)), None
+                )
+            return candidates[0] if candidates else None
+
+        def describe(item: dict) -> dict:
+            entry = {"name": item.get("name"), "uri": item.get("uri")}
+            artists = artists_of(item)
+            if artists:
+                entry["artists"] = artists
+            return entry
+
+        track_hit = None
+        if media_type == "track" and artist_hint:
+            for query in queries:
+                try:
+                    hit = await self.ma_call(
+                        "music/track_by_name",
+                        {"track_name": query, "artist_name": artist_hint},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "track_by_name failed for %r/%r: %s",
+                        query,
+                        artist_hint,
+                        exc,
+                    )
+                    hit = None
+                if isinstance(hit, dict) and hit.get("uri"):
+                    track_hit = hit
+                    break
+
         searches = []
         all_items = []
         seen_uris = set()
-        for query in queries:
-            result = await self.ma_call(
-                "music/search",
-                {
-                    "search_query": query,
-                    "media_types": [media_type],
-                    "providers": ["library"],
-                    "limit": 8,
-                },
-            )
-            items = [item for item in (result.get(key) or []) if item.get("uri")]
+
+        def add_items(query: str, items: list[dict]):
+            items = [item for item in (items or []) if item.get("uri")]
             searches.append((query, items))
             for item in items:
-                uri = item.get("uri")
-                if uri and uri not in seen_uris:
+                uri = item["uri"]
+                if uri not in seen_uris:
                     seen_uris.add(uri)
                     all_items.append(item)
 
-        selected = None
-        for query, items in searches:
-            selected = next(
-                (i for i in items if norm(i.get("name", "")) == norm(query)), None
-            )
-            if selected:
-                break
-        if selected is None:
-            for query, items in searches:
-                selected = next(
-                    (
-                        i
-                        for i in items
-                        if norm(query) in norm(i.get("name", ""))
-                        or norm(i.get("name", "")) in norm(query)
-                    ),
-                    None,
+        if track_hit:
+            seen_uris.add(track_hit["uri"])
+            all_items.append(track_hit)
+        if media_type == "genre":
+            try:
+                genres = await self.ma_call(
+                    "music/genres/library_items",
+                    {"media_type": "track", "content_type": "music", "limit": 500},
                 )
-                if selected:
-                    break
-        if selected is None and searches and searches[0][1]:
+            except Exception as exc:  # noqa: BLE001
+                log.warning("genre lookup failed: %s", exc)
+                genres = []
+            if not isinstance(genres, list):
+                genres = []
+            genres = [item for item in genres if item.get("uri")]
+            genres.sort(key=lambda item: len(str(item.get("name", ""))))
+            for query in queries:
+                needle = norm(query)
+                items = [
+                    item
+                    for item in genres
+                    if norm(item.get("name", "")) == needle
+                    or norm(item.get("name", "")).startswith(needle)
+                ]
+                add_items(query, items)
+        else:
+            for query in queries:
+                result = await self.ma_call(
+                    "music/search",
+                    {
+                        "search_query": query,
+                        "media_types": [media_type],
+                        "providers": ["library"],
+                        "limit": 8,
+                    },
+                )
+                add_items(query, result.get(key) or [])
+
+        selected = track_hit
+        if selected is None:
+            exact = [
+                item
+                for query, items in searches
+                for item in items
+                if norm(item.get("name", "")) == norm(query)
+            ]
+            selected = pick_exact(exact)
+        if selected is None:
+            if media_type in ("track", "album", "genre"):
+                partial = [
+                    item
+                    for query, items in searches
+                    for item in items
+                    if norm(item.get("name", "")).startswith(norm(query))
+                ]
+            else:
+                partial = [
+                    item
+                    for query, items in searches
+                    for item in items
+                    if norm(query) in norm(item.get("name", ""))
+                    or norm(item.get("name", "")) in norm(query)
+                ]
+            selected = pick_partial(partial)
+        if (
+            selected is None
+            and media_type not in ("track", "album", "genre")
+            and searches
+            and searches[0][1]
+        ):
             selected = searches[0][1][0]
 
         response = {
@@ -693,36 +816,39 @@ class Bridge:
             "player_id": pid,
             "queue_id": qid,
             "media_type": media_type,
+            "artist": artist_hint,
+            "shuffle": shuffle,
             "queries": queries,
             "query": queries[0],
             "dry_run": dry_run,
-            "candidates": [
-                {"name": i.get("name"), "uri": i.get("uri")} for i in all_items[:5]
-            ],
-            "selected": (
-                {"name": selected.get("name"), "uri": selected.get("uri")}
-                if selected
-                else None
-            ),
+            "candidates": [describe(item) for item in all_items[:5]],
+            "selected": describe(selected) if selected else None,
         }
         if selected is None:
             response["ok"] = False
-            response["error"] = f"no {media_type} matched {queries}"
+            response["error"] = (
+                f"no {media_type} matched {queries}"
+                + (f" by {artist_hint}" if artist_hint else "")
+            )
             return response
         if dry_run:
             response["played"] = False
             return response
 
-        await self.ma_call(
-            "player_queues/play_media",
-            {
-                "queue_id": qid,
-                "media": selected["uri"],
-                "option": "play",
-            },
-        )
+        play_args = {
+            "queue_id": qid,
+            "media": selected["uri"],
+            "option": "play",
+        }
+        if shuffle:
+            play_args["shuffle"] = True
+        await self.ma_call("player_queues/play_media", play_args)
         response["played"] = True
-        response["display"] = f"正在播放 {selected.get('name')}"
+        response["display"] = (
+            f"随机播放 {selected.get('name')}"
+            if shuffle
+            else f"正在播放 {selected.get('name')}"
+        )
         return response
 
 

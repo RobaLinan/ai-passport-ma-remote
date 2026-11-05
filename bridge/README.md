@@ -10,8 +10,10 @@ Local bridge for the AI Passport Music Assistant remote. It receives 16 kHz mono
 Azure), asks DeepSeek to turn the transcript into a small JSON intent, and
 executes the result against Music Assistant.
 
-Supported intents: play an artist, play a playlist, play a random recent track.
-Transport and volume are handled by the device buttons, not by voice.
+Supported intents: play an artist, album, track, genre, or playlist; play a
+random recent track. Artist, album, and playlist requests can be shuffled with a
+voice command. Transport and volume are handled by the device buttons, not by
+voice.
 
 ## Requirements
 
@@ -79,9 +81,13 @@ file alongside the script when deploying. Edit it and restart the service, or
 set `INTENT_PROMPT_FILE` to use a different path.
 
 The prompt must keep returning the JSON contract understood by the bridge:
-`play_media` with `media_type` `artist` or `playlist` and 1-3 `queries`,
-`play_random`, or `unsupported`. Changing that contract also requires updating
-`parse_intent()` and the command handlers.
+`play_media` with `media_type` `artist`, `album`, `track`, `genre`, or
+`playlist` and 1-3 `queries`, plus optional `artist` (for track/album
+disambiguation) and `shuffle` (boolean); or `play_random`, or `unsupported`.
+Track requests with an `artist` use `music/track_by_name` before falling back to
+`music/search`. Genre requests use `music/genres/library_items` with
+`media_type=track` and exact/prefix matching. Changing the contract also
+requires updating `parse_intent()` and the command handlers.
 
 ## systemd (user service)
 
@@ -122,8 +128,12 @@ player. The device also re-resolves its own target on boot and screen wake.
   to your STT language (the old `HA_LANGUAGE` still works).
 - `ha` picks an Assist pipeline by language; `nabucasa` only accepts the Nabu
   Casa Cloud engine and fails with the available engine list if none matches.
-- Artist aliases are handled by asking DeepSeek for translated/original candidate
-  names before searching the MA library.
+- Artist and track aliases are handled by asking DeepSeek for translated/original
+  candidate names before searching the MA library.
+- Genre playback uses the music genres that actually have tracks in the library;
+  MA resolves a genre to a randomized set of tracks. MA has no mood/atmosphere
+  filter: mood words are treated as playlist names, so create a playlist with
+  that name (for example "romantic" or "relaxing") to use them.
 - Random playback uses the recently played tracks, falling back to recently added
   tracks filtered to 1–10 minutes.
 - Secrets are read from files or environment variables; never commit them.

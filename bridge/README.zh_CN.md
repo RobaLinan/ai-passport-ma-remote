@@ -6,7 +6,7 @@
 
 AI Passport 遥控器的局域网语音 bridge：接收设备上传的 16 kHz 单声道 16-bit PCM，用可配置的 STT 服务转成文字（Home Assistant / Nabu Casa、本地 Whisper、OpenAI 兼容接口或 Azure），让 DeepSeek 输出受限制的 JSON 意图，然后调用 Music Assistant 执行。
 
-支持的意图：播放歌手、播放歌单、随机播放最近听过的歌曲。播放/暂停、切歌和音量由设备按键控制，不走语音。
+支持的意图：播放歌手、专辑、单曲、流派或歌单，随机播放最近听过的歌曲；歌手、专辑和歌单可以用语音要求随机播放。播放/暂停、切歌和音量由设备按键控制，不走语音。
 
 ## 依赖
 
@@ -66,8 +66,11 @@ chmod 600 .env secrets/*
 DeepSeek 的系统提示词在 `bridge.py` 同目录的 `intent_prompt.txt`；部署时请把这个文件
 和脚本放在一起。修改后重启服务，也可以用 `INTENT_PROMPT_FILE` 指向其他路径。
 
-提示词必须保持 bridge 能解析的 JSON 契约：`play_media` 配 `media_type` `artist` 或
-`playlist` 和 1-3 个 `queries`，或 `play_random`、`unsupported`。如果修改契约，
+提示词必须保持 bridge 能解析的 JSON 契约：`play_media` 配 `media_type` `artist`、
+`album`、`track`、`genre` 或 `playlist` 和 1-3 个 `queries`，可选 `artist`（用于区分同名
+单曲/专辑）和 `shuffle`（布尔值）；或 `play_random`、`unsupported`。带 `artist` 的单曲
+请求会先用 `music/track_by_name` 精确匹配，再回退到 `music/search`。流派请求用
+`music/genres/library_items`（只取有曲目的音乐流派）做精确/前缀匹配。如果修改契约，
 还需要同步修改 `parse_intent()` 和命令执行逻辑。
 
 ## systemd（user 服务）
@@ -100,6 +103,9 @@ Passport 首次开机进入 `Passport-XXXX` 配网热点，在 `192.168.4.1` 填
 
 - 意图提示词（`intent_prompt.txt`）和界面是中文；用 `STT_LANGUAGE` 匹配你的 STT 语言（旧配置里的 `HA_LANGUAGE` 仍兼容）。
 - `ha` 模式下按语言自动挑选 Assist pipeline；`nabucasa` 只接受 Nabu Casa Cloud 引擎，找不到会直接报错并列出可用引擎。
-- 歌手别名由 DeepSeek 生成译名/原名候选，再在 MA 库里搜索。
+- 歌手和曲名别名由 DeepSeek 生成译名/原名候选，再在 MA 库里搜索。
+- 流派播放只使用库里有曲目的音乐流派；MA 会把流派解析成一批随机曲目。MA 没有心情/氛围
+  筛选，浪漫、放松这类词会当作同名歌单处理；需要先在 MA 里创建同名歌单。
+- 中文流派词由 DeepSeek 映射成库里的英文流派名（蓝调→Blues、摇滚→Rock 等）。
 - 随机播放优先用最近播放的 track，不足时回退到最近添加并过滤 1–10 分钟。
 - 密钥只从文件或环境变量读取，不要提交到仓库。

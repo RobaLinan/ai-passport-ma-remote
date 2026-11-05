@@ -10,9 +10,9 @@
 
 > [!IMPORTANT]
 > **功能边界：** AI Passport 固件本身只提供简单的播放控制：播放/暂停、切歌和音量。
-> 语音请求由设备录音，但意图解析和播放决策在后台 bridge 中完成。bridge 目前只支持
-> 简单的名称查找（歌手或歌单名，以及随机播放）；更复杂的语音指令需要自行修改
-> `bridge/intent_prompt.txt`。
+> 语音请求由设备录音，但意图解析和播放决策在后台 bridge 中完成。bridge 目前支持
+> 歌手、专辑、单曲、流派和歌单查找，以及随机播放和语音随机播放；更复杂的语音指令需要
+> 自行修改 `bridge/intent_prompt.txt`。
 
 <p align="center">
   <img src="assets/images/ma-remote-banner.png" width="440"
