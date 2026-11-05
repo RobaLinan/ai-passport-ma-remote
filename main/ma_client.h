@@ -15,6 +15,7 @@ typedef struct {
     bool volume_known;
     bool can_volume;
     bool has_media;
+    bool is_group;
 } ma_player_t;
 
 typedef struct {

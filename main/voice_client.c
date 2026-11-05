@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -380,18 +381,19 @@ static void run_ptt(const voice_event_t *start, uint8_t *prebuf) {
 
 static void voice_task(void *arg) {
     (void)arg;
-    uint8_t *prebuf = malloc(VOICE_PREBUF_BYTES);
-    if (!prebuf) {
-        ESP_LOGE(TAG, "voice prebuffer allocation failed");
-        s_audio_ok = false;
-        vTaskDelete(NULL);
-        return;
-    }
     for (;;) {
         voice_event_t ev;
         if (xQueueReceive(s_events, &ev, portMAX_DELAY) != pdTRUE) continue;
         if (ev.type != VOICE_EV_START) continue;
+        uint8_t *prebuf = malloc(VOICE_PREBUF_BYTES);
+        if (!prebuf) {
+            ESP_LOGE(TAG, "prebuffer alloc failed (heap %u)", esp_get_free_heap_size());
+            ui_msg("内存不足", "无法录音");
+            ui_hold(2500);
+            continue;
+        }
         run_ptt(&ev, prebuf);
+        free(prebuf);
     }
 }
 

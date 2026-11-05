@@ -358,12 +358,14 @@ static bool queue_id_copy(char *out, size_t cap) {
 
 static void resolve_player(void) {
     if (ma_fetch_players(&s_players) != ESP_OK) {
-        ESP_LOGW(TAG, "active player resolution failed");
+        ESP_LOGW(TAG, "active player resolution failed (heap %u)",
+                 esp_get_free_heap_size());
         return;
     }
 
     const ma_player_t *playing_config = NULL;
     const ma_player_t *playing_any = NULL;
+    const ma_player_t *group_media = NULL;
     const ma_player_t *paused_config = NULL;
     const ma_player_t *paused_any = NULL;
     const ma_player_t *configured = NULL;
@@ -371,6 +373,9 @@ static void resolve_player(void) {
         const ma_player_t *player = &s_players.items[i];
         const bool is_config = strcmp(player->player_id, s_config.player_id) == 0;
         if (is_config) configured = player;
+        if (player->is_group && player->has_media && !group_media) {
+            group_media = player;
+        }
         if (strcmp(player->state, "playing") == 0) {
             if (is_config) playing_config = player;
             else if (!playing_any) playing_any = player;
@@ -381,6 +386,7 @@ static void resolve_player(void) {
     }
 
     const ma_player_t *best = playing_config ? playing_config : playing_any;
+    if (!best) best = group_media;
     if (!best) best = paused_config ? paused_config : paused_any;
     if (!best) best = configured;
     if (!best && s_players.count > 0) best = &s_players.items[0];

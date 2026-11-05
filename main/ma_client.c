@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <stdio.h>
@@ -185,6 +186,11 @@ static void player_parse(const cJSON *root, const char *player_id, ma_player_t *
     }
 
     copy_json_str(player->state, sizeof(player->state), root, "playback_state");
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    const cJSON *members = cJSON_GetObjectItemCaseSensitive(root, "group_members");
+    player->is_group =
+        (cJSON_IsString(type) && strcmp(type->valuestring, "group") == 0) ||
+        cJSON_IsArray(members);
     const cJSON *media = cJSON_GetObjectItemCaseSensitive(root, "current_media");
     if (cJSON_IsObject(media)) {
         const cJSON *title = cJSON_GetObjectItemCaseSensitive(media, "title");
@@ -262,7 +268,11 @@ esp_err_t ma_fetch_players(ma_players_t *out) {
     memset(out, 0, sizeof(*out));
 
     char *buf = malloc(PLAYERS_LIST_CAP);
-    if (!buf) return ESP_ERR_NO_MEM;
+    if (!buf) {
+        ESP_LOGE(TAG, "players/all alloc failed (%u bytes, heap %u)",
+                 (unsigned)PLAYERS_LIST_CAP, esp_get_free_heap_size());
+        return ESP_ERR_NO_MEM;
+    }
     size_t len = 0;
     esp_err_t err = ma_post("players/all", "{\"return_unavailable\":false}",
                             buf, PLAYERS_LIST_CAP, &len);
