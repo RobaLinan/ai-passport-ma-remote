@@ -118,9 +118,12 @@ The Passport's setup AP collects the WiFi credentials, the MA host/port/token an
 the bridge host/port. Use this bridge's LAN address (for example
 `192.168.1.20`) and port `8096`.
 
-`MA_PLAYER_ID` is optional. If omitted, the bridge selects the currently
-playing player, otherwise a paused player with media, otherwise the first usable
-player. The device also re-resolves its own target on boot and screen wake.
+`MA_PLAYER_ID` is optional and must be a Music Assistant player id (`syncgroup_…`
+for a group, `up…` for a speaker), not a Home Assistant `media_player.*` entity
+id. If omitted (recommended), the bridge auto-detects: a group with media, then a
+playing player, then a paused player with media, then any group, then the first
+usable player. A configured id that is missing or unavailable falls back to
+auto-detection. The device also re-resolves its own target on boot and screen wake.
 
 ## Notes
 

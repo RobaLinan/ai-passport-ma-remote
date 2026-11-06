@@ -531,7 +531,7 @@ class Bridge:
         return intent
 
     async def resolve_target(self, player_id: str | None, queue_id: str | None):
-        pid = (player_id or DEFAULT_PLAYER_ID).strip()
+        pid = (player_id or "").strip()
         if not pid:
             players = await self.ma_call(
                 "players/all", {"return_unavailable": False}
@@ -544,26 +544,65 @@ class Bridge:
                 and not item.get("private")
                 and not item.get("hide_in_ui")
             ]
-            best = next(
-                (item for item in usable if item.get("playback_state") == "playing"),
-                None,
-            )
-            if best is None:
-                best = next(
+            if not usable:
+                raise RuntimeError("no usable MA player found")
+
+            def is_group(item):
+                return item.get("type") == "group" or bool(item.get("group_childs"))
+
+            def has_media(item):
+                return bool(item.get("current_media"))
+
+            configured = DEFAULT_PLAYER_ID.strip()
+            if configured:
+                pid = next(
                     (
-                        item
+                        item["player_id"]
                         for item in usable
-                        if item.get("playback_state") == "paused"
-                        and item.get("current_media")
+                        if item.get("player_id") == configured
                     ),
+                    "",
+                )
+                if not pid:
+                    log.warning(
+                        "MA_PLAYER_ID %s not found or unavailable; auto-selecting",
+                        configured,
+                    )
+            if not pid:
+                best = next(
+                    (item for item in usable if is_group(item) and has_media(item)),
                     None,
                 )
-            if best is None and usable:
-                best = usable[0]
-            if best is None:
-                raise RuntimeError("no usable MA player found")
-            pid = best["player_id"]
-            log.info("auto-selected player %s (%s)", best.get("name"), pid)
+                if best is None:
+                    best = next(
+                        (
+                            item
+                            for item in usable
+                            if item.get("playback_state") == "playing"
+                        ),
+                        None,
+                    )
+                if best is None:
+                    best = next(
+                        (
+                            item
+                            for item in usable
+                            if item.get("playback_state") == "paused"
+                            and has_media(item)
+                        ),
+                        None,
+                    )
+                if best is None:
+                    best = next((item for item in usable if is_group(item)), None)
+                if best is None:
+                    best = usable[0]
+                pid = best["player_id"]
+                log.info(
+                    "auto-selected player %s (%s, %s)",
+                    best.get("name"),
+                    pid,
+                    best.get("playback_state"),
+                )
         if queue_id:
             return pid, queue_id.strip()
         try:
