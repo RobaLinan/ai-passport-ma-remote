@@ -14,4 +14,5 @@ void app_ui_set_volume_ex(int volume, bool estimated);
 void app_ui_set_listening(bool listening);
 void app_ui_set_audio_level(int level);
 void app_ui_set_ota_progress(int percent);
+void app_ui_set_card_opacity(int percent);
 void app_ui_set_provisioning(const char *ap_ssid);

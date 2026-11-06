@@ -118,6 +118,10 @@ esp_err_t wifi_sta_start(const char *ssid, const char *pass) {
     esp_err_t ps = esp_wifi_set_ps(WIFI_PS_NONE);
     if (ps != ESP_OK) ESP_LOGW(TAG, "disable power save failed: %s", esp_err_to_name(ps));
 
+    // 2.4 GHz 40 MHz channels overlap heavily; force 20 MHz for stability.
+    esp_err_t bw = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    if (bw != ESP_OK) ESP_LOGW(TAG, "set HT20 failed: %s", esp_err_to_name(bw));
+
     s_started = true;
     s_state = WIFI_STA_CONNECTING;
     ESP_LOGI(TAG, "connecting to '%s'", ssid);

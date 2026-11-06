@@ -49,6 +49,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->ma_port = APP_SECRET_MA_PORT;
     cfg->bridge_port = APP_SECRET_BRIDGE_PORT;
     cfg->brightness = 100;
+    cfg->card_opacity = 75;
     cfg->sleep_timeout_s = 60;
     cfg->provisioned = false;
 }
@@ -115,6 +116,11 @@ esp_err_t app_config_load(app_config_t *cfg) {
     uint8_t brightness;
     if (nvs_get_u8(nvs, "brightness", &brightness) == ESP_OK) cfg->brightness = brightness;
     else seed = true;
+    uint8_t card_opacity;
+    if (nvs_get_u8(nvs, "card_opacity", &card_opacity) == ESP_OK &&
+        card_opacity <= 100) {
+        cfg->card_opacity = card_opacity;
+    }
     uint16_t sleep_s;
     if (nvs_get_u16(nvs, "sleep_timeout_s", &sleep_s) == ESP_OK) cfg->sleep_timeout_s = sleep_s;
     else seed = true;
@@ -158,6 +164,7 @@ esp_err_t app_config_save_all(const app_config_t *cfg) {
     if (e == ESP_OK) e = nvs_set_str(nvs, "bridge_host", cfg->bridge_host);
     if (e == ESP_OK) e = nvs_set_u16(nvs, "bridge_port", cfg->bridge_port);
     if (e == ESP_OK) e = nvs_set_u8(nvs, "brightness", cfg->brightness);
+    if (e == ESP_OK) e = nvs_set_u8(nvs, "card_opacity", cfg->card_opacity);
     if (e == ESP_OK) e = nvs_set_u16(nvs, "sleep_timeout_s", cfg->sleep_timeout_s);
     if (e == ESP_OK) e = nvs_set_u8(nvs, "provisioned", 1);
     if (e == ESP_OK) e = nvs_commit(nvs);

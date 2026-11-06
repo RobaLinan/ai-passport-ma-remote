@@ -38,6 +38,8 @@ static lv_obj_t *s_volume_bar;
 static lv_obj_t *s_battery;
 static lv_obj_t *s_wifi;
 static lv_obj_t *s_wave[WAVE_BARS];
+static lv_obj_t *s_cards[2];
+static lv_opa_t s_card_opa = 191;
 
 static const uint8_t k_wave_curve[WAVE_BARS] = { 45, 70, 100, 80, 95, 60, 85, 75, 50 };
 
@@ -55,7 +57,7 @@ static lv_obj_t *card_create(lv_obj_t *parent, int x, int y, int w, int h, int r
     lv_obj_set_pos(card, x, y);
     lv_obj_set_size(card, w, h);
     lv_obj_set_style_bg_color(card, lv_color_hex(UI_CARD), 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(card, s_card_opa, 0);
     lv_obj_set_style_radius(card, radius, 0);
     lv_obj_set_style_border_width(card, 0, 0);
     lv_obj_set_style_pad_all(card, 0, 0);
@@ -138,6 +140,7 @@ void app_ui_init(void) {
     lv_obj_set_style_pad_all(divider, 0, 0);
 
     lv_obj_t *now = card_create(scr, 10, 42, 220, 152, 14);
+    s_cards[0] = now;
     s_state = label_create(now, LV_SYMBOL_PLAY, FONT_ICON, UI_FAINT);
     lv_obj_align(s_state, LV_ALIGN_TOP_RIGHT, -14, 12);
 
@@ -172,6 +175,7 @@ void app_ui_init(void) {
     }
 
     lv_obj_t *volume = card_create(scr, 10, 204, 220, 56, 14);
+    s_cards[1] = volume;
     lv_obj_t *volume_icon = label_create(volume, LV_SYMBOL_VOLUME_MAX, FONT_ICON, UI_MUTED);
     lv_obj_set_pos(volume_icon, 14, 12);
     s_volume_value = label_create(volume, "--", FONT_BODY, UI_TEXT);
@@ -252,6 +256,15 @@ void app_ui_set_audio_level(int level) {
         const int h = WAVE_MIN_H + extra;
         lv_obj_set_size(s_wave[i], 4, h);
         lv_obj_set_pos(s_wave[i], 72 + i * 9, WAVE_BASELINE - h);
+    }
+}
+
+void app_ui_set_card_opacity(int percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    s_card_opa = (lv_opa_t)((percent * 255 + 50) / 100);
+    for (int i = 0; i < 2; i++) {
+        if (s_cards[i]) lv_obj_set_style_bg_opa(s_cards[i], s_card_opa, 0);
     }
 }
 

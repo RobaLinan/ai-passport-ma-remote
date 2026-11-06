@@ -385,8 +385,8 @@ static void resolve_player(void) {
         }
     }
 
-    const ma_player_t *best = playing_config ? playing_config : playing_any;
-    if (!best) best = group_media;
+    const ma_player_t *best = group_media;
+    if (!best) best = playing_config ? playing_config : playing_any;
     if (!best) best = paused_config ? paused_config : paused_any;
     if (!best) best = configured;
     if (!best && s_players.count > 0) best = &s_players.items[0];
@@ -532,12 +532,15 @@ static void net_task(void *arg) {
         return;
     }
 
-    resolve_player();
-    s_resolve_player = false;
-
     char queue_id[96];
-    if (s_config.player_id[0] &&
-        ma_fetch_queue_id(queue_id, sizeof(queue_id)) == ESP_OK) {
+    bool queue_ok =
+        s_config.player_id[0] &&
+        ma_fetch_queue_id(queue_id, sizeof(queue_id)) == ESP_OK;
+    if (!queue_ok && s_config.player_id[0]) {
+        vTaskDelay(pdMS_TO_TICKS(250));
+        queue_ok = ma_fetch_queue_id(queue_id, sizeof(queue_id)) == ESP_OK;
+    }
+    if (queue_ok) {
         queue_id_store(queue_id);
         ESP_LOGI(TAG, "using queue '%s', free heap %u", queue_id, esp_get_free_heap_size());
     } else {
@@ -552,7 +555,8 @@ static void net_task(void *arg) {
         const wifi_sta_state_t state = wifi_sta_state();
         if (state != last_wifi) {
             ui_wifi(state == WIFI_STA_CONNECTED);
-            if (state != WIFI_STA_CONNECTED && !voice_client_ui_blocked()) {
+            if (state != WIFI_STA_CONNECTED && !voice_client_ui_blocked() &&
+                !ota_server_ui_blocked()) {
                 ui_message("WiFi 断开", "重连中");
             } else if (state == WIFI_STA_CONNECTED && last_wifi != WIFI_STA_IDLE) {
                 s_resolve_player = true;
@@ -567,12 +571,21 @@ static void net_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
+        if (ota_server_busy()) {
+            // OTA owns the screen and the network while it writes Flash.
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
         if (s_resolve_player) {
             s_resolve_player = false;
-            resolve_player();
+            ma_status_t probe;
+            const bool keep_current =
+                s_config.player_id[0] && ma_fetch_status(&probe) == ESP_OK &&
+                (probe.playing || probe.title[0] || probe.duration_s > 0);
+            if (!keep_current) resolve_player();
         }
         if (!s_config.player_id[0]) {
-            ui_message("没有可用播放器", "检查 MA");
+            if (!ota_server_ui_blocked()) ui_message("没有可用播放器", "检查 MA");
             s_resolve_player = true;
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
@@ -616,7 +629,7 @@ static void net_task(void *arg) {
                 s_volume_known = false;
                 ui_volume_ex(s_volume, true);
             }
-            if (!voice_client_ui_blocked()) {
+            if (!voice_client_ui_blocked() && !ota_server_ui_blocked()) {
                 ui_wifi(true);
                 ui_track(&st);
             }
@@ -638,13 +651,17 @@ static void net_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         } else if (err == ESP_ERR_INVALID_STATE) {
             auth_failed = true;
-            if (!voice_client_ui_blocked()) ui_message("Token 失效", "更新 MA token");
+            if (!voice_client_ui_blocked() && !ota_server_ui_blocked()) {
+                ui_message("Token 失效", "更新 MA token");
+            }
             ESP_LOGE(TAG, "MA rejected token (HTTP %d)", ma_last_http_status());
         } else {
             ui_wifi(true);
             if (!ma_offline) {
                 ma_offline = true;
-                if (!voice_client_ui_blocked()) ui_message("MA 离线", "重试中");
+                if (!voice_client_ui_blocked() && !ota_server_ui_blocked()) {
+                    ui_message("MA 离线", "重试中");
+                }
             }
             ESP_LOGW(TAG, "players/get failed (HTTP %d)", ma_last_http_status());
             vTaskDelay(pdMS_TO_TICKS(5000));
@@ -681,6 +698,7 @@ void app_main(void) {
 
     if (bsp_lvgl_lock(1000)) {
         app_ui_init();
+        app_ui_set_card_opacity(s_config.card_opacity);
         bsp_lvgl_unlock();
     } else {
         ESP_LOGE(TAG, "LVGL lock failed while building UI");
