@@ -31,6 +31,28 @@ static void copy_json_str(char *dst, size_t cap, const cJSON *obj, const char *k
     }
 }
 
+// The group queue response can exceed QUEUE_RESP_CAP because it embeds the
+// queue items; queue_id is still in the leading bytes. Extract it before
+// attempting to parse a possibly truncated JSON document.
+static bool json_string_prefix(const char *buf, const char *key, char *out, size_t cap) {
+    const char *p = strstr(buf, key);
+    if (!p) return false;
+    p += strlen(key);
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    if (*p != ':') return false;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    if (*p != '"') return false;
+    p++;
+    const char *end = strchr(p, '"');
+    if (!end) return false;
+    const size_t n = (size_t)(end - p);
+    if (n == 0 || n >= cap) return false;
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return true;
+}
+
 static int json_int(const cJSON *obj, const char *key, int fallback) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     return cJSON_IsNumber(item) ? (int)item->valuedouble : fallback;
@@ -331,15 +353,18 @@ esp_err_t ma_fetch_queue_id(char *queue_id, size_t cap) {
     esp_err_t err = ma_post("player_queues/get_active_queue", args,
                             buf, QUEUE_RESP_CAP, &len);
     if (err == ESP_OK) {
-        cJSON *root = cJSON_Parse(buf);
-        if (cJSON_IsObject(root)) {
-            copy_json_str(queue_id, cap, root, "queue_id");
+        if (!json_string_prefix(buf, "\"queue_id\"", queue_id, cap)) {
+            cJSON *root = cJSON_Parse(buf);
+            if (cJSON_IsObject(root)) {
+                copy_json_str(queue_id, cap, root, "queue_id");
+            }
+            cJSON_Delete(root);
+        }
+        if (queue_id[0]) {
             ESP_LOGI(TAG, "active queue '%s' (%u bytes)", queue_id, (unsigned)len);
-            if (!queue_id[0]) err = ESP_FAIL;
         } else {
             err = ESP_FAIL;
         }
-        cJSON_Delete(root);
     }
     free(buf);
     return err;
