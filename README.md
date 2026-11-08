@@ -1,4 +1,5 @@
 <p align="right">
+  <a href="https://github.com/RobaLinan/ai-passport-ma-remote/releases/latest">Releases</a> ·
   <a href="README.zh_CN.md">简体中文</a> · <strong>English</strong>
 </p>
 
@@ -8,6 +9,9 @@ A dedicated Music Assistant remote built on the FoloToy AI Passport (ESP32-C3).
 The device is a controller only: it shows what is playing, sends transport and
 volume commands, and supports push-to-talk voice requests through a local bridge.
 It does not decode or play music.
+
+**Firmware downloads:** [latest GitHub release](https://github.com/RobaLinan/ai-passport-ma-remote/releases/latest)
+(full USB image and OTA app image).
 
 > [!IMPORTANT]
 > **Scope:** The AI Passport firmware itself provides only basic playback

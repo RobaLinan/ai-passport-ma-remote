@@ -1,4 +1,5 @@
 <p align="right">
+  <a href="https://github.com/RobaLinan/ai-passport-ma-remote/releases/latest">Releases</a> ·
   <strong>简体中文</strong> · <a href="README.md">English</a>
 </p>
 
@@ -7,6 +8,9 @@
 基于 FoloToy AI Passport（ESP32-C3）的 Music Assistant 专用遥控器。设备只做控制器：
 显示当前播放内容、发送播放/音量和切歌命令，并通过局域网 bridge 支持按住说话。
 设备本身不解码、不播放音乐。
+
+**固件下载：** [最新 GitHub Release](https://github.com/RobaLinan/ai-passport-ma-remote/releases/latest)
+（包含首次 USB 整片镜像和 OTA app 镜像）。
 
 > [!IMPORTANT]
 > **功能边界：** AI Passport 固件本身只提供简单的播放控制：播放/暂停、切歌和音量。
