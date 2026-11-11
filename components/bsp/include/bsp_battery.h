@@ -7,6 +7,8 @@
 
 // 初始化。内部会调 bsp_i2c_init()(幂等)。
 // 芯片不应答时返回 ESP_ERR_NOT_FOUND —— 上层可据此在 UI 上标记该项不可用。
+// 首次 SOC 等待超时返回 ESP_ERR_TIMEOUT，但保留句柄：运行期 soc()/mv() 仍可
+// 读到芯片当前值，再次调用本函数只重跑等待段。
 esp_err_t bsp_battery_init(void);
 
 // 将 CW2017 CONFIG 写为睡眠值并回读确认，失败时重试一次。这是 deep

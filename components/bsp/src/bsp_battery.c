@@ -43,6 +43,8 @@ _Static_assert(sizeof(s_battery_profile) == CW_PROFILE_SIZE,
                "CW2017 battery profile must contain exactly 80 bytes");
 
 static i2c_master_dev_handle_t s_dev;
+// 就绪标志：就绪等待超时（软降级）后保持为假，重试 init 只重跑等待段。
+static bool s_ready;
 
 static esp_err_t cw_read(uint8_t reg, uint8_t *buf, size_t n) {
     if (!s_dev) return ESP_ERR_INVALID_STATE;
@@ -115,39 +117,52 @@ static int cw_update_profile(void) {
     return cw_enter_active();
 }
 
-// 首次计算期间 SOC 可能暂时大于 100；最多等待 5 秒再判定初始化失败。
+// 首次计算期间 SOC 可能暂时大于 100；冷启动（深睡唤醒/久置断电后）SOC 与电压
+// 可能同时读到 0——供电中的板上 0 mV 物理不可能，低于 2500 mV 也带不动 3.3V
+// 供电链路，一律视为尚未就绪，在等待窗口内继续轮询。
+#define CW_MV_MIN_PLAUSIBLE 2500
+
 static int cw_wait_soc_ready(void) {
     for (int retry = 0; retry < 50; retry++) {
         uint8_t soc = 0;
         vTaskDelay(pdMS_TO_TICKS(100));
-        if (cw_read(CW_REG_SOC_H, &soc, 1) == 0 && soc <= 100) return 0;
+        if (cw_read(CW_REG_SOC_H, &soc, 1) == 0 && soc <= 100 &&
+            bsp_battery_mv() >= CW_MV_MIN_PLAUSIBLE) return 0;
     }
     return -1;
 }
 
 esp_err_t bsp_battery_init(void) {
-    if (s_dev) return ESP_OK;
+    if (s_ready) return ESP_OK;
 
-    esp_err_t e = bsp_i2c_init();
-    if (e != ESP_OK) return e;
+    // 一次性探测（总线/句柄/VERSION）只在无句柄时执行；软降级后的重试直接
+    // 进入 profile 校验与就绪等待。
+    esp_err_t e = ESP_OK;
+    if (!s_dev) {
+        e = bsp_i2c_init();
+        if (e != ESP_OK) return e;
 
-    i2c_device_config_t dc = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = BSP_I2C_CW2017_ADDR,
-        .scl_speed_hz    = 100000,
-    };
-    e = i2c_master_bus_add_device(bsp_i2c_bus(), &dc, &s_dev);
-    if (e != ESP_OK) { ESP_LOGE(TAG, "添加 I2C 设备失败: %s", esp_err_to_name(e)); return e; }
+        i2c_device_config_t dc = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address  = BSP_I2C_CW2017_ADDR,
+            .scl_speed_hz    = 100000,
+        };
+        e = i2c_master_bus_add_device(bsp_i2c_bus(), &dc, &s_dev);
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "添加 I2C 设备失败: %s", esp_err_to_name(e));
+            return e;
+        }
 
-    uint8_t ver = 0;
-    if (cw_read(CW_REG_VERSION, &ver, 1) != 0) {
-        ESP_LOGW(TAG, "CW2017 未应答 —— 用 bsp_i2c_scan() 确认 0x%02X 是否在线;"
-                      "无电量计的板子可忽略本项", BSP_I2C_CW2017_ADDR);
-        i2c_master_bus_rm_device(s_dev);
-        s_dev = NULL;
-        return ESP_ERR_NOT_FOUND;
+        uint8_t ver = 0;
+        if (cw_read(CW_REG_VERSION, &ver, 1) != 0) {
+            ESP_LOGW(TAG, "CW2017 未应答 —— 用 bsp_i2c_scan() 确认 0x%02X 是否在线;"
+                          "无电量计的板子可忽略本项", BSP_I2C_CW2017_ADDR);
+            i2c_master_bus_rm_device(s_dev);
+            s_dev = NULL;
+            return ESP_ERR_NOT_FOUND;
+        }
+        ESP_LOGI(TAG, "检测到 CW2017 VERSION=0x%02X", ver);
     }
-    ESP_LOGI(TAG, "检测到 CW2017 VERSION=0x%02X", ver);
 
     bool profile_matches = false;
     if (cw_profile_matches(&profile_matches) != 0) {
@@ -177,10 +192,12 @@ esp_err_t bsp_battery_init(void) {
     }
 
     if (cw_wait_soc_ready() != 0) {
-        ESP_LOGE(TAG, "等待首次 SOC 计算超时");
-        e = ESP_ERR_TIMEOUT;
-        goto fail;
+        // 软降级：句柄保留、s_ready 仍为假。soc()/mv() 照常读芯片当前值；
+        // 应用层周期刷新会在电量计追上来后自愈，重试 init 只重跑等待段。
+        ESP_LOGE(TAG, "等待首次 SOC 计算超时（软降级，运行期读数继续可用）");
+        return ESP_ERR_TIMEOUT;
     }
+    s_ready = true;
 
     ESP_LOGI(TAG, "CW2017 ready: SOC=%d%%, voltage=%d mV",
              bsp_battery_soc(), bsp_battery_mv());
