@@ -699,6 +699,7 @@ void app_main(void) {
     if (bsp_lvgl_lock(1000)) {
         app_ui_init();
         app_ui_set_card_opacity(s_config.card_opacity);
+        app_ui_set_battery_offset(s_config.battery_offset);
         bsp_lvgl_unlock();
     } else {
         ESP_LOGE(TAG, "LVGL lock failed while building UI");

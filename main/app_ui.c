@@ -40,6 +40,7 @@ static lv_obj_t *s_wifi;
 static lv_obj_t *s_wave[WAVE_BARS];
 static lv_obj_t *s_cards[2];
 static lv_opa_t s_card_opa = 191;
+static int s_battery_offset;
 
 static const uint8_t k_wave_curve[WAVE_BARS] = { 45, 70, 100, 80, 95, 60, 85, 75, 50 };
 
@@ -101,9 +102,18 @@ static void set_playing_icon(bool playing) {
     lv_obj_set_style_text_color(s_state, lv_color_hex(playing ? UI_PLAYING : UI_FAINT), 0);
 }
 
+static int calibrated_soc(int raw) {
+    if (raw < 0) return -1;
+    int soc = raw + s_battery_offset;
+    if (soc < 0) soc = 0;
+    if (soc > 100) soc = 100;
+    return soc;
+}
+
 static void battery_tick(lv_timer_t *timer) {
     (void)timer;
-    const int soc = bsp_battery_soc();
+    if (!s_battery) return;
+    const int soc = calibrated_soc(bsp_battery_soc());
     const char *symbol = LV_SYMBOL_BATTERY_EMPTY;
     if (soc >= 90) symbol = LV_SYMBOL_BATTERY_FULL;
     else if (soc >= 65) symbol = LV_SYMBOL_BATTERY_3;
@@ -266,6 +276,13 @@ void app_ui_set_card_opacity(int percent) {
     for (int i = 0; i < 2; i++) {
         if (s_cards[i]) lv_obj_set_style_bg_opa(s_cards[i], s_card_opa, 0);
     }
+}
+
+void app_ui_set_battery_offset(int percent) {
+    if (percent < -30) percent = -30;
+    if (percent > 30) percent = 30;
+    s_battery_offset = percent;
+    battery_tick(NULL);
 }
 
 void app_ui_set_ota_progress(int percent) {

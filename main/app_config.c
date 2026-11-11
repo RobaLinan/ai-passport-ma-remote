@@ -50,6 +50,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->bridge_port = APP_SECRET_BRIDGE_PORT;
     cfg->brightness = 100;
     cfg->card_opacity = 75;
+    cfg->battery_offset = 0;
     cfg->sleep_timeout_s = 60;
     cfg->provisioned = false;
 }
@@ -121,6 +122,13 @@ esp_err_t app_config_load(app_config_t *cfg) {
         card_opacity <= 100) {
         cfg->card_opacity = card_opacity;
     }
+    int8_t battery_offset;
+    if (nvs_get_i8(nvs, "batt_offset", &battery_offset) == ESP_OK &&
+        battery_offset >= -30 && battery_offset <= 30) {
+        cfg->battery_offset = battery_offset;
+    } else {
+        seed = true;
+    }
     uint16_t sleep_s;
     if (nvs_get_u16(nvs, "sleep_timeout_s", &sleep_s) == ESP_OK) cfg->sleep_timeout_s = sleep_s;
     else seed = true;
@@ -135,6 +143,7 @@ esp_err_t app_config_load(app_config_t *cfg) {
         nvs_set_u16(nvs, "ma_port", cfg->ma_port);
         nvs_set_u16(nvs, "bridge_port", cfg->bridge_port);
         nvs_set_u8(nvs, "brightness", cfg->brightness);
+        nvs_set_i8(nvs, "batt_offset", cfg->battery_offset);
         nvs_set_u16(nvs, "sleep_timeout_s", cfg->sleep_timeout_s);
         nvs_set_u8(nvs, "provisioned", cfg->provisioned ? 1 : 0);
         e = nvs_commit(nvs);
@@ -165,6 +174,7 @@ esp_err_t app_config_save_all(const app_config_t *cfg) {
     if (e == ESP_OK) e = nvs_set_u16(nvs, "bridge_port", cfg->bridge_port);
     if (e == ESP_OK) e = nvs_set_u8(nvs, "brightness", cfg->brightness);
     if (e == ESP_OK) e = nvs_set_u8(nvs, "card_opacity", cfg->card_opacity);
+    if (e == ESP_OK) e = nvs_set_i8(nvs, "batt_offset", cfg->battery_offset);
     if (e == ESP_OK) e = nvs_set_u16(nvs, "sleep_timeout_s", cfg->sleep_timeout_s);
     if (e == ESP_OK) e = nvs_set_u8(nvs, "provisioned", 1);
     if (e == ESP_OK) e = nvs_commit(nvs);

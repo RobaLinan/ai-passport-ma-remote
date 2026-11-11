@@ -39,6 +39,9 @@ It does not decode or play music.
   Wyoming, OpenAI-compatible or Azure), DeepSeek intent parsing and MA playback.
 - Player auto-resolution on boot and screen wake; idle dim, screen off and deep
   sleep with key wake. A connected USB host blocks deep sleep.
+- Web config at `/config` for WiFi, MA/bridge endpoints, card opacity and a
+  battery display offset; network changes apply after reboot, appearance and
+  calibration immediately.
 - OTA app updates over the LAN from a browser, using two app slots. The first
   OTA-capable image needs one USB flash; later updates keep NVS settings.
 

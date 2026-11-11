@@ -15,6 +15,7 @@ typedef struct {
     uint16_t bridge_port;
     uint8_t brightness;
     uint8_t card_opacity;
+    int8_t battery_offset;
     uint16_t sleep_timeout_s;
     bool provisioned;
 } app_config_t;

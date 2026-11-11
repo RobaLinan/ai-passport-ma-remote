@@ -33,6 +33,8 @@
 - 局域网语音 bridge：Home Assistant Assist STT（Nabu Casa Cloud、本地 Whisper、
   Wyoming、OpenAI 兼容接口或 Azure）、DeepSeek 意图解析和 MA 播放。
 - 开机和亮屏唤醒时自动解析播放器；空闲调暗、熄屏、按键唤醒深睡；连接 USB 主机时不深睡。
+- `/config` 网页可改 WiFi、MA/bridge 地址、卡片不透明度和电池显示偏移；
+  网络配置重启后生效，外观和校准立即生效。
 - 局域网浏览器 OTA 升级，使用双 app 分区。首次需要 USB 烧录一次，之后升级保留 NVS 配置。
 
 ## 界面截图

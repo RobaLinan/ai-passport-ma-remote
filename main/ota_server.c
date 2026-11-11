@@ -2,6 +2,7 @@
 
 #include "app_config.h"
 #include "app_ui.h"
+#include "bsp_battery.h"
 #include "bsp_display.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -219,6 +220,13 @@ static const char CONFIG_OPACITY[] =
     "<input name='card_opacity' type='number' min='0' max='100' value='%u'>"
     "<p>0 = 全透明，100 = 不透明；保存后立即生效。</p>";
 
+static const char CONFIG_BATTERY[] =
+    "<h2 style='margin-top:28px;font-size:18px'>电池校准</h2>"
+    "<p>电量计：%s；电压：%s。校准后显示：%s。</p>"
+    "<label>显示偏移 (%%)，范围 -30 到 30</label>"
+    "<input name='batt_offset' type='number' min='-30' max='30' value='%d'>"
+    "<p>显示电量 = 电量计读数 + 偏移，限制在 0-100；保存后立即生效。</p>";
+
 static const char CONFIG_TAIL[] =
     "<button type='submit'>保存配置</button></form>"
     "<p><a style='color:#4cc2ff' href='/'>返回升级页</a></p></body></html>";
@@ -254,6 +262,22 @@ static esp_err_t config_get(httpd_req_t *req) {
              "<input name='bridge_host' required maxlength='63' value='%s'>", bridge_host);
     if (chunk_send(req, line) != ESP_OK) return ESP_FAIL;
     snprintf(line, sizeof(line), CONFIG_OPACITY, (unsigned)cfg.card_opacity);
+    if (chunk_send(req, line) != ESP_OK) return ESP_FAIL;
+
+    const int raw_soc = bsp_battery_soc();
+    const int mv = bsp_battery_mv();
+    char soc_text[16], mv_text[16], cal_text[16];
+    if (raw_soc < 0) snprintf(soc_text, sizeof(soc_text), "--");
+    else snprintf(soc_text, sizeof(soc_text), "%d%%", raw_soc);
+    if (mv < 0) snprintf(mv_text, sizeof(mv_text), "--");
+    else snprintf(mv_text, sizeof(mv_text), "%d mV", mv);
+    int cal_soc = raw_soc < 0 ? -1 : raw_soc + cfg.battery_offset;
+    if (cal_soc < 0) cal_soc = 0;
+    if (cal_soc > 100) cal_soc = 100;
+    if (raw_soc < 0) snprintf(cal_text, sizeof(cal_text), "--");
+    else snprintf(cal_text, sizeof(cal_text), "%d%%", cal_soc);
+    snprintf(line, sizeof(line), CONFIG_BATTERY, soc_text, mv_text, cal_text,
+             (int)cfg.battery_offset);
     if (chunk_send(req, line) != ESP_OK) return ESP_FAIL;
     if (chunk_send(req, CONFIG_TAIL) != ESP_OK) return ESP_FAIL;
     return httpd_resp_send_chunk(req, NULL, 0);
@@ -316,6 +340,15 @@ static esp_err_t config_post(httpd_req_t *req) {
     if (ma_port < 0 || bridge_port < 0) {
         return send_text(req, "400 Bad Request", "端口必须为 1-65535");
     }
+    char offset_buf[8];
+    if (form_get(body, "batt_offset", offset_buf, sizeof(offset_buf))) {
+        char *end = NULL;
+        const long value = strtol(offset_buf, &end, 10);
+        if (!end || *end != '\0' || value < -30 || value > 30) {
+            return send_text(req, "400 Bad Request", "电量偏移必须为 -30 到 30");
+        }
+        cfg.battery_offset = (int8_t)value;
+    }
 
     snprintf(cfg.wifi_ssid, sizeof(cfg.wifi_ssid), "%s", ssid);
     if (pass[0]) snprintf(cfg.wifi_pass, sizeof(cfg.wifi_pass), "%s", pass);
@@ -332,11 +365,13 @@ static esp_err_t config_post(httpd_req_t *req) {
         ESP_LOGE(TAG, "config save failed: %s", esp_err_to_name(err));
         return send_text(req, "500 Internal Server Error", "写入 NVS 失败");
     }
-    ESP_LOGI(TAG, "config saved: WiFi '%s', MA %s:%d, bridge %s:%d, opacity %u",
+    ESP_LOGI(TAG, "config saved: WiFi '%s', MA %s:%d, bridge %s:%d, opacity %u, "
+                  "battery offset %d",
              cfg.wifi_ssid, cfg.ma_host, cfg.ma_port, cfg.bridge_host, cfg.bridge_port,
-             (unsigned)cfg.card_opacity);
+             (unsigned)cfg.card_opacity, (int)cfg.battery_offset);
     if (bsp_lvgl_lock(200)) {
         app_ui_set_card_opacity(cfg.card_opacity);
+        app_ui_set_battery_offset(cfg.battery_offset);
         bsp_lvgl_unlock();
     }
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -345,7 +380,7 @@ static esp_err_t config_post(httpd_req_t *req) {
         "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
         "<body style='font-family:sans-serif;background:#0b0f14;color:#f2f5f8;padding:32px'>"
         "<h2 style='color:#63d08b'>配置已保存</h2>"
-        "<p>WiFi/MA 重启后生效；卡片不透明度已立即应用。</p>"
+        "<p>WiFi/MA 重启后生效；卡片不透明度和电量偏移已立即应用。</p>"
         "<p><a style='color:#4cc2ff' href='/config'>返回配置</a></p></body></html>");
 }
 
